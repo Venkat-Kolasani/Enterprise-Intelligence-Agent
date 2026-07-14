@@ -11,6 +11,9 @@ export default defineConfig({
       '/signals': 'http://localhost:8000',
       '/insights': 'http://localhost:8000',
       '/recommendations': 'http://localhost:8000',
+      '/briefings': 'http://localhost:8000',
+      '/chat': 'http://localhost:8000',
+      '/scenarios': 'http://localhost:8000',
     },
   },
 })

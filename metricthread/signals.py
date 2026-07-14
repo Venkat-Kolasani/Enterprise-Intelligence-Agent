@@ -124,6 +124,8 @@ class SignalAnalysisReport:
 class SignalRepository(Protocol):
     def list_accepted(self) -> list[SignalEvidence]: ...
 
+    def list_metric_observations(self) -> list[MetricObservation]: ...
+
     def run_analysis(self) -> SignalAnalysisReport: ...
 
 
@@ -136,6 +138,9 @@ class InMemorySignalRepository:
 
     def list_accepted(self) -> list[SignalEvidence]:
         return sorted(self._signals.values(), key=lambda signal: signal.confidence_score, reverse=True)
+
+    def list_metric_observations(self) -> list[MetricObservation]:
+        return list(self._observations)
 
     def run_analysis(self) -> SignalAnalysisReport:
         report = DeterministicSignalEngine().analyze(self._observations)

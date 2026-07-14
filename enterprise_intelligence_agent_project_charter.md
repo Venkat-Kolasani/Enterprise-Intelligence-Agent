@@ -612,6 +612,56 @@ The first real browser check exposed a Vite development-proxy omission: `/signal
 - Trade-offs accepted: New API prefixes must be added deliberately to the Vite development proxy; production deployment still needs an explicit reverse-proxy or `VITE_API_BASE_URL` configuration.
 - Revisit trigger: The deployed frontend/backend topology is selected in Phase 6.
 
+### Phase 5 Conversational Interface and Briefing Results — 2026-07-15
+
+Phase 5 added Supabase-backed `briefings` and `scenario_forecasts` persistence, `POST /briefings/generate`, `POST /chat`, and `POST /scenarios/forecast`, plus the executive dashboard panel. Briefings include only insight IDs that no previous briefing contains. The chat endpoint performs deterministic structured retrieval over stored insights, their recommendations, and related persisted correlation signals; it refuses an insight if any of its stored signal IDs is no longer accepted. Every factual answer returns the insight and signal IDs used. An explicit follow-up can carry up to five prior insight IDs, but the server reuses them only for scoped follow-up wording such as “What action is proposed?” It does not treat an unrelated question as supported merely because an earlier answer existed. Unsupported requests return the explicit `no_evidence` result with empty citation lists.
+
+The scenario is intentionally constrained to `marketing_spend`, a change from -20% through +20%, and a one-to-seven-day horizon. It fits deterministic least-squares models on the synthetic history, reserves the final 30 applicable observations for a held-out backtest, calculates prediction intervals from full-fit residual RMSE, and computes a versioned reliability score from held-out accuracy and interval compactness. Its persisted record includes baseline and forecast values, intervals, assumptions, model version, and the supporting signal ID. It is labelled a deterministic synthetic scenario rather than a causal guarantee.
+
+Correctness and negative-control checks were run with `./scripts/test`: `23 passed, 1 skipped`, followed by a successful Vite production build. The skip is still the unavailable raw Postgres TCP integration fixture; the only warning is the existing FastAPI/Starlette TestClient deprecation warning. An initial Phase 5 test run exposed that exposing the signal repository's observation reader had broken an existing private-method test seam; the public method now delegates to the retained private reader, and the full suite passed again. The tests verify that a briefing is not regenerated without new material, the cited CAC question and its “What action is proposed?” follow-up resolve to the same stored insight and signal, a stale insight without an accepted stored signal and an unsupported competitor-pricing question both refuse, a +10% seven-day scenario raises synthetic day-five revenue and day-one CAC as predefined, the intervals contain each point forecast, and out-of-scope +21% input returns HTTP 422.
+
+The real Supabase-backed check first created briefing `4d9fa479-4009-4978-9990-6a40a36c8395` from the existing grounded insight, then confirmed that a later manual run returned no new material. A direct run returned the existing cited insight `cbf71432-e269-4af0-b114-7d7bad87f93b` and signal `0a3a777e-08b6-5b99-b348-cd6174608cc6` for both the initial CAC answer and its follow-up, returned `no_evidence` for competitor pricing, and persisted scenario `73f01d1a-f343-4150-94bb-2a1f52d96af8`. After adding the accepted-signal check to chat retrieval, the final direct run repeated those answers and persisted scenario `46ce77f8-fef7-4dd4-8cb2-55f051e0b706`. Both scenarios cited `60d2b683-f31a-523f-b2ec-69ae55649165`, had reliability `98.06`, and forecast day-seven revenue from `975618.89` to `1004458.35` and CAC from `127.20` to `128.02`. The combined first direct check completed in 10.0 seconds; Phase 5 adds no hot-path component, so the Phase 2 stream latency/reliability result remains the applicable ingestion target rather than being restated as a scenario p95. The browser demo against the local API and real Supabase data loaded without a Vite error overlay or browser errors, showed the cited initial and follow-up answers, showed the explicit refusal, and displayed the `98.1` reliability forecast result. It also demonstrated the manual briefing control returning “No newly generated insight is available for a briefing” after the earlier briefing, which is the expected deduplication behavior.
+
+#### Decision: Use deterministic structured retrieval with a narrow cited-follow-up context
+
+- Decision: Answer executive chat from persisted insights, recommendations, and signal IDs only, with optional prior insight IDs restricted to recognised follow-up requests.
+- Context: The executive needs a useful conversation without allowing a language model to invent facts beyond the accepted evidence record.
+- Options considered: A general-purpose model chat over raw events; embedding retrieval without required citations; deterministic structured filtering with cited prior-context support.
+- Choice made: Deterministic filtering of persisted records, citation lists on every factual answer, and a small prior-insight list used only after follow-up wording passes a server-side guard.
+- Rationale: This returns the same evidence for an auditable “What action is proposed?” follow-up while leaving an unrelated competitor-pricing request unsupported. It keeps the Phase 4 provider-generated insight bounded by its stored evidence rather than making a second model call.
+- Trade-offs accepted: The chat is intentionally narrower and less conversational than open-ended LLM chat; questions that cannot match stored evidence or a recognised cited follow-up are refused.
+- Revisit trigger: An evaluated retrieval layer can improve recall while continuing to return exact persisted IDs and demonstrate no-evidence refusals for unsupported questions.
+
+#### Decision: Deliver the briefing as on-demand generation until deployment supplies a durable scheduler
+
+- Decision: Implement `POST /briefings/generate` and the dashboard's “Generate executive briefing” action as the current daily-summary path, deduplicated by briefing insight IDs.
+- Context: The Phase 5 objective permits generation on demand when scheduling is unavailable. The local free-tier build has no durable deployed scheduler yet, and a process-local timer would not survive restarts or be an honest daily-job claim.
+- Options considered: Add an in-process interval and present it as scheduled; wait for Phase 6 deployment; provide the manual, persisted fallback now and document the deployment dependency.
+- Choice made: Persisted on-demand generation now, with durable scheduling explicitly deferred to the Phase 6 deployment design.
+- Rationale: The executive can generate a repeatable briefing today, and the database check proves that it contains only material not previously briefed. This avoids falsely representing a local development process as a reliable scheduler.
+- Trade-offs accepted: A user or future scheduler must invoke the endpoint; the local app does not automatically create a daily briefing.
+- Revisit trigger: Vercel/Render scheduling is configured in Phase 6 and demonstrated to invoke the endpoint idempotently against the deployed database.
+
+#### Decision: Keep the scenario deterministic, back-tested, and narrowly scoped to marketing spend
+
+- Decision: Accept only a marketing-spend change between -20% and +20% for one through seven days; use held-out synthetic backtesting, residual intervals, and a deterministic reliability score instead of language-model forecasting.
+- Context: A what-if control is compelling in the executive demo but an unconstrained model-generated projection would be neither reproducible nor defensible.
+- Options considered: Free-form multi-metric LLM simulation; a single deterministic marketing-spend model without intervals; a constrained deterministic model with persistence, intervals, and reliability.
+- Choice made: The constrained deterministic scenario with `synthetic_marketing_spend_ols_v1`, a 30-observation holdout, and persisted assumptions and supporting signal ID.
+- Rationale: It produces the known synthetic forecast direction and visible uncertainty while clearly separating predictive modelling from a causal claim.
+- Trade-offs accepted: The synthetic assumptions hold other drivers at their latest values, use fixed effect timing, and cannot answer arbitrary executive what-if questions.
+- Revisit trigger: Governed production data and calibrated out-of-sample performance justify adding further approved input metrics or richer causal methods.
+
+#### Decision: Extend the local Vite proxy for executive API routes
+
+- Decision: Proxy `/briefings`, `/chat`, and `/scenarios` to FastAPI in local Vite development.
+- Context: The dashboard uses relative API paths so its executive controls must reach the same local backend as the earlier pipeline and evidence controls.
+- Options considered: Hardcode an API base URL in the executive panel; perform browser-only direct requests; extend the existing development proxy.
+- Choice made: Extend the existing proxy with the three Phase 5 prefixes.
+- Rationale: Browser verification exercised each new endpoint through the real UI with no JSON, CORS, or Vite overlay error.
+- Trade-offs accepted: New API namespaces require a deliberate proxy addition during local development.
+- Revisit trigger: Phase 6 sets the deployed frontend/backend routing and `VITE_API_BASE_URL` configuration.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.

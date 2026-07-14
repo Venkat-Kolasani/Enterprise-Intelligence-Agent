@@ -72,6 +72,9 @@ class SupabaseSignalRepository:
         except httpx.HTTPError as error:
             raise RuntimeError(f"Supabase signal reconciliation failed: {error}") from error
 
+    def list_metric_observations(self) -> list[MetricObservation]:
+        return self._metric_observations()
+
     def _metric_observations(self) -> list[MetricObservation]:
         rows: list[dict[str, Any]] = []
         page_size = 1_000

@@ -36,8 +36,17 @@ function App() {
   const [generating, setGenerating] = useState(false)
   const [signalError, setSignalError] = useState(null)
   const [decisionError, setDecisionError] = useState(null)
+  const [executiveError, setExecutiveError] = useState(null)
   const [statusDrafts, setStatusDrafts] = useState({})
   const [outcomeDrafts, setOutcomeDrafts] = useState({})
+  const [briefingResult, setBriefingResult] = useState(null)
+  const [briefingBusy, setBriefingBusy] = useState(false)
+  const [chatQuestion, setChatQuestion] = useState('Why is CAC rising?')
+  const [chatResult, setChatResult] = useState(null)
+  const [chatBusy, setChatBusy] = useState(false)
+  const [scenarioInput, setScenarioInput] = useState({ change: 10, horizon: 7 })
+  const [forecast, setForecast] = useState(null)
+  const [forecastBusy, setForecastBusy] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -153,6 +162,62 @@ function App() {
     }
   }
 
+  async function generateBriefing() {
+    setBriefingBusy(true)
+    try {
+      const result = await getJson('/briefings/generate', { method: 'POST' })
+      setBriefingResult(result)
+      setExecutiveError(null)
+    } catch (requestError) {
+      setExecutiveError(requestError.message)
+    } finally {
+      setBriefingBusy(false)
+    }
+  }
+
+  async function askGroundedQuestion(event) {
+    event.preventDefault()
+    setChatBusy(true)
+    try {
+      const result = await getJson('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: chatQuestion,
+          prior_insight_ids: chatResult?.insight_ids ?? [],
+        }),
+      })
+      setChatResult(result)
+      setExecutiveError(null)
+    } catch (requestError) {
+      setExecutiveError(requestError.message)
+    } finally {
+      setChatBusy(false)
+    }
+  }
+
+  async function generateForecast(event) {
+    event.preventDefault()
+    setForecastBusy(true)
+    try {
+      const result = await getJson('/scenarios/forecast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input_metric: 'marketing_spend',
+          input_change_percent: Number(scenarioInput.change),
+          horizon_days: Number(scenarioInput.horizon),
+        }),
+      })
+      setForecast(result.forecast)
+      setExecutiveError(null)
+    } catch (requestError) {
+      setExecutiveError(requestError.message)
+    } finally {
+      setForecastBusy(false)
+    }
+  }
+
   const isRunning = status?.simulation_state === 'running'
   const coldBlocked = Boolean(status?.last_cold_error)
 
@@ -203,6 +268,11 @@ function App() {
       {decisionError && (
         <p className="warning" role="status">
           Grounded recommendation workflow is unavailable: {decisionError}
+        </p>
+      )}
+      {executiveError && (
+        <p className="warning" role="status">
+          Executive workflow is unavailable: {executiveError}
         </p>
       )}
 
@@ -372,6 +442,81 @@ function App() {
             ))}
           </div>
         )}
+      </section>
+
+      <section className="executive-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Executive workflow</p>
+            <h2>Brief, ask, and test a bounded decision</h2>
+          </div>
+          <span>Stored evidence only</span>
+        </div>
+        <div className="executive-grid">
+          <article className="executive-card">
+            <p className="eyebrow">Morning briefing</p>
+            <h3>New material, on demand</h3>
+            <button type="button" className="secondary-action" onClick={generateBriefing} disabled={briefingBusy}>
+              {briefingBusy ? 'Generating…' : 'Generate executive briefing'}
+            </button>
+            {briefingResult && (
+              briefingResult.generated ? (
+                <div className="executive-result">
+                  <p>{briefingResult.briefing.summary_text}</p>
+                  <small>Insight IDs: {briefingResult.briefing.insight_ids.map((id) => id.slice(0, 8)).join(', ')}</small>
+                </div>
+              ) : <p className="empty-inline">{briefingResult.reason}</p>
+            )}
+          </article>
+
+          <article className="executive-card">
+            <p className="eyebrow">Grounded follow-up</p>
+            <h3>Ask the stored evidence</h3>
+            <form className="chat-form" onSubmit={askGroundedQuestion}>
+              <label>
+                Question
+                <input value={chatQuestion} onChange={(event) => setChatQuestion(event.target.value)} maxLength="1000" required />
+              </label>
+              <button type="submit" className="secondary-action" disabled={chatBusy}>
+                {chatBusy ? 'Answering…' : 'Ask grounded question'}
+              </button>
+            </form>
+            {chatResult && (
+              <div className="executive-result" aria-live="polite">
+                <p>{chatResult.answer}</p>
+                {chatResult.result === 'answer' && (
+                  <small>Insight IDs: {chatResult.insight_ids.map((id) => id.slice(0, 8)).join(', ')} · Signal IDs: {chatResult.signal_ids.map((id) => id.slice(0, 8)).join(', ')}</small>
+                )}
+              </div>
+            )}
+          </article>
+
+          <article className="executive-card scenario-card">
+            <p className="eyebrow">What-if scenario</p>
+            <h3>Marketing spend only</h3>
+            <form className="scenario-form" onSubmit={generateForecast}>
+              <label>
+                Spend change (%)
+                <input type="number" min="-20" max="20" step="1" value={scenarioInput.change} onChange={(event) => setScenarioInput((input) => ({ ...input, change: event.target.value }))} required />
+              </label>
+              <label>
+                Horizon (days)
+                <select value={scenarioInput.horizon} onChange={(event) => setScenarioInput((input) => ({ ...input, horizon: event.target.value }))}>
+                  {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>{day}</option>)}
+                </select>
+              </label>
+              <button type="submit" disabled={forecastBusy}>{forecastBusy ? 'Forecasting…' : 'Run deterministic forecast'}</button>
+            </form>
+            {forecast && (
+              <div className="forecast-result" aria-live="polite">
+                <strong>Reliability {Number(forecast.reliability_score).toFixed(1)} / 100</strong>
+                <p>Day {forecast.horizon_days} revenue: {Number(forecast.forecast_values.recognized_revenue.at(-1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                <p>Day {forecast.horizon_days} CAC: {Number(forecast.forecast_values.client_acquisition_cost.at(-1)).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+                <small>Signal ID: {forecast.supporting_signal_ids[0].slice(0, 8)} · Deterministic scenario, not a causal guarantee.</small>
+              </div>
+            )}
+          </article>
+        </div>
       </section>
 
       <footer>All values are labelled synthetic. Recommendations are grounded in persisted evidence and remain human-controlled.</footer>

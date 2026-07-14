@@ -13,6 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from metricthread.executive import (
+    BriefingService,
+    ExecutiveStore,
+    GroundedChatService,
+    ScenarioForecastService,
+)
+from metricthread.executive_repository import executive_store_from_environment
 from metricthread.insight_repository import insight_store_from_environment
 from metricthread.insights import (
     GroundedInsightService,
@@ -39,6 +46,17 @@ class OutcomeRequest(BaseModel):
     outcome_value: float
     measured_at: datetime
     notes: str = Field(default="", max_length=2_000)
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=1_000)
+    prior_insight_ids: list[UUID] = Field(default_factory=list, max_length=5)
+
+
+class ScenarioForecastRequest(BaseModel):
+    input_metric: Literal["marketing_spend"]
+    input_change_percent: float = Field(ge=-20, le=20)
+    horizon_days: int = Field(ge=1, le=7)
 
 
 class AgentRuntime:
@@ -95,6 +113,7 @@ def create_app(
     signal_repository: SignalRepository | None = None,
     insight_store: InsightStore | None = None,
     narrative_generator: NarrativeGenerator | None = None,
+    executive_store: ExecutiveStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -102,6 +121,7 @@ def create_app(
         app.state.signal_repository = signal_repository
         app.state.insight_store = insight_store
         app.state.narrative_generator = narrative_generator
+        app.state.executive_store = executive_store
         app.state.grounded_insight_service = None
         yield
         await app.state.runtime.stop()
@@ -162,6 +182,13 @@ def create_app(
             app.state.grounded_insight_service = service
         return service
 
+    def executive_store_instance() -> ExecutiveStore:
+        configured_store = app.state.executive_store
+        if configured_store is None:
+            configured_store = executive_store_from_environment()
+            app.state.executive_store = configured_store
+        return configured_store
+
     @app.get("/signals")
     def signals() -> dict[str, object]:
         return {
@@ -212,7 +239,7 @@ def create_app(
         if generated is None:
             return {
                 "generated": False,
-                "reason": "No newly accepted or materially changed signal requires a GPT narrative.",
+                "reason": "No newly accepted or materially changed signal requires a configured-model narrative.",
             }
         return {
             "generated": True,
@@ -252,6 +279,47 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         return {"recommendation": recommendation.as_public_dict()}
+
+    @app.post("/briefings/generate")
+    async def generate_briefing() -> dict[str, object]:
+        briefing = await asyncio.to_thread(BriefingService(insights_store(), executive_store_instance()).generate)
+        if briefing is None:
+            return {
+                "generated": False,
+                "reason": "No newly generated insight is available for a briefing.",
+                "simulation_label": "synthetic live simulation",
+            }
+        return {
+            "generated": True,
+            "simulation_label": "synthetic live simulation",
+            "briefing": briefing.as_public_dict(),
+        }
+
+    @app.post("/chat")
+    def chat(request: ChatRequest) -> dict[str, object]:
+        result = GroundedChatService(insights_store(), repository()).answer(
+            request.question,
+            prior_insight_ids=tuple(str(insight_id) for insight_id in request.prior_insight_ids),
+        )
+        return {
+            "simulation_label": "synthetic live simulation",
+            **result.as_public_dict(),
+        }
+
+    @app.post("/scenarios/forecast")
+    async def scenario_forecast(request: ScenarioForecastRequest) -> dict[str, object]:
+        try:
+            forecast = await asyncio.to_thread(
+                ScenarioForecastService(repository(), executive_store_instance()).forecast,
+                input_change_percent=request.input_change_percent,
+                horizon_days=request.horizon_days,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {
+            "simulation_label": "synthetic live simulation",
+            "forecast": forecast.as_public_dict(),
+        }
 
     return app
 
