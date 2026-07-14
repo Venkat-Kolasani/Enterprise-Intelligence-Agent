@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid5
 
+import httpx
 import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
@@ -15,6 +16,7 @@ from metricthread.generator import GeneratedDataset, generate_dataset
 
 
 MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "001_foundation.sql"
+SIGNAL_ENGINE_MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "002_signal_engine.sql"
 
 
 def database_url() -> str:
@@ -29,12 +31,20 @@ def _set_search_path(connection: psycopg.Connection, schema: str | None) -> None
         connection.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(schema)))
 
 
-def apply_foundation_migration(url: str, schema: str | None = None) -> None:
-    statements = [statement.strip() for statement in MIGRATION_PATH.read_text().split(";") if statement.strip()]
+def _apply_migration(url: str, migration_path: Path, schema: str | None = None) -> None:
+    statements = [statement.strip() for statement in migration_path.read_text().split(";") if statement.strip()]
     with psycopg.connect(url) as connection:
         _set_search_path(connection, schema)
         for statement in statements:
             connection.execute(statement)
+
+
+def apply_foundation_migration(url: str, schema: str | None = None) -> None:
+    _apply_migration(url, MIGRATION_PATH, schema)
+
+
+def apply_signal_engine_migration(url: str, schema: str | None = None) -> None:
+    _apply_migration(url, SIGNAL_ENGINE_MIGRATION_PATH, schema)
 
 
 def seed_foundation(url: str, schema: str | None = None) -> GeneratedDataset:
@@ -112,6 +122,45 @@ def seed_foundation(url: str, schema: str | None = None) -> GeneratedDataset:
                     for event in dataset.events
                 ],
             )
+    return dataset
+
+
+def seed_foundation_via_data_api(supabase_url: str, secret_key: str) -> GeneratedDataset:
+    """Synchronize the canonical fixture when raw Postgres access is unavailable."""
+    resolved_entities = resolve_exact_keys(foundation_source_records())
+    dataset = generate_dataset(resolved_entities)
+    rows = [
+        {
+            "id": str(event.id),
+            "entity_id": str(event.entity_id),
+            "domain": event.domain,
+            "metric_name": event.metric_name,
+            "value": event.value,
+            "unit": event.unit,
+            "dimensions": event.dimensions,
+            "event_time": event.event_time.isoformat(),
+            "source_system": event.source_system,
+        }
+        for event in dataset.events
+    ]
+    endpoint = f"{supabase_url.rstrip('/')}/rest/v1/metric_events"
+    headers = {
+        "apikey": secret_key,
+        "Authorization": f"Bearer {secret_key}",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    for offset in range(0, len(rows), 100):
+        response = httpx.post(
+            endpoint,
+            params={"on_conflict": "entity_id,metric_name,event_time,source_system"},
+            headers=headers,
+            json=rows[offset : offset + 100],
+            timeout=10.0,
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise RuntimeError(f"Supabase canonical seed write failed at row {offset}: {error}") from error
     return dataset
 
 

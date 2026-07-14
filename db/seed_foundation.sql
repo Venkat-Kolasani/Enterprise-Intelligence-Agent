@@ -1,5 +1,12 @@
--- Phase 1 manual fallback for Supabase SQL Editor.
+-- Phase 1 bootstrap fallback for Supabase SQL Editor.
 -- All rows are synthetic and the script is safe to re-run.
+--
+-- This bootstrap uses deterministic SQL-only values so it can be run in the
+-- Supabase dashboard. It is not the canonical statistical fixture. When raw
+-- Postgres connectivity is unavailable, follow it with `uv run python -m
+-- metricthread.cli seed-rest`; that authenticated server-side Data API command
+-- upserts the exact versioned Python generator values under the same natural
+-- keys before any signal analysis is run.
 
 INSERT INTO entities (id, entity_type, display_name, external_ids)
 VALUES

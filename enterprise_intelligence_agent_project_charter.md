@@ -524,6 +524,54 @@ The root test command returned `8 passed, 1 skipped` plus one upstream FastAPI T
 - Trade-offs accepted: A secret key bypasses Row Level Security and must be protected as deployment-only configuration; the demo is single-tenant and has no user authorization model yet.
 - Revisit trigger: Production authentication, tenant isolation, or a reliably reachable Postgres connection changes the appropriate persistence boundary.
 
+### Phase 3 Deterministic Signal Engine Results — 2026-07-14
+
+The Phase 3 implementation added `002_signal_engine.sql`, a deterministic daily-series engine, an authenticated Supabase Data API signal repository, `GET /signals`, and `POST /signals/run`. Each run rejects duplicate, missing, non-finite, or non-contiguous daily series; requires at least 60 usable observations; runs ADF with BIC-selected lags through seven and applies one first difference only when needed; selects a bivariate VAR order by BIC; tests the selected order with the SSR F-test; and applies Benjamini-Hochberg correction once across the predeclared 54 directed cross-domain candidate pairs. Only q <= 0.05 evidence is retained. Each retained row includes p, q, F-statistic, incremental delta-R-squared effect, model observations, transformations and ADF p-values, deterministic confidence components, a data digest, and a stable fingerprint. The React dashboard now exposes an evidence table and explicitly calls each displayed relationship predictive evidence rather than causation.
+
+The manually applied Phase 3 migration completed in the Supabase SQL Editor with `Success. No rows returned`. The first real signal run then correctly revealed a data-fixture defect: the SQL Editor seed fallback had substituted shared sine-wave terms for the canonical Python generator's seeded Gaussian noise. It returned 15 accepted pairs, including the declared `partner_active_rate -> recognized_revenue` negative control. This was not accepted as a statistical-engine success. The canonical 1,620-event Python fixture was synchronized through the authenticated Data API under the existing natural key, prior engine evidence was reconciled, and the analysis was rerun. The corrected real results were 54 candidates, four accepted signals, and 50 rejected candidates. The primary `partner_referral_quality -> client_acquisition_cost` evidence had q = 5.87e-54, F-test model observations = 174, BIC-selected history = five days, incremental effect = 0.58287 delta-R-squared, and confidence = 99.33. Its source and target were first-differenced after non-stationary raw ADF results. The two declared controls were absent from persisted evidence and failed correction at q = 0.572 (`partner_active_rate -> recognized_revenue`) and q = 0.762 (`partner_incentive_budget -> qualified_leads`).
+
+Two complete real Supabase read/analyze/reconcile/persist runs took 3.340 seconds and 2.587 seconds respectively and produced identical evidence fingerprints. The repository contained exactly four persisted signals after reconciliation. The final `./scripts/test` run returned `15 passed, 1 skipped`; the skipped test remains the unavailable raw Postgres TCP fixture, and one upstream FastAPI TestClient deprecation warning remains. The frontend production build passed. A browser test against the real Supabase-backed local API loaded without a Vite overlay or connection error, showed the four persisted rows, and successfully invoked `POST /signals/run` through the “Run evidence analysis” control. Groundedness is not applicable until Phase 4, because no GPT reasoning is invoked or displayed in this phase.
+
+#### Decision: Use a full directed cross-domain candidate family with correction and explicit non-causal language
+
+- Decision: Evaluate all 54 directed pairs formed by the nine metrics across different domains, then retain only Benjamini-Hochberg corrected q <= 0.05 evidence.
+- Context: The product must discover cross-functional signals automatically while controlling the false-discovery risk inherent in testing many pairs.
+- Options considered: Test the hero pair only; tune or blacklist known controls; evaluate the predeclared full cross-domain family with correction.
+- Choice made: Evaluate the full 54-pair candidate family and persist only corrected evidence, including secondary or mediated-looking predictive signals.
+- Rationale: The corrected real run retains the primary signal and three additional predictive relationships while rejecting both declared controls. This is more auditable than making the test family depend on the desired demo result.
+- Trade-offs accepted: Bivariate testing can retain relationships driven by an omitted common factor or mediation, so a retained signal is not a unique business driver and must not be narrated as a root cause.
+- Revisit trigger: A governed multivariate model and out-of-sample evaluation demonstrate a material reduction in false or redundant signals.
+
+#### Decision: Treat BIC order as model history, not an asserted business delay
+
+- Decision: Present the BIC-selected order as “BIC model history” and store it as test configuration metadata; do not present it as the exact day on which a business outcome occurs.
+- Context: The synthetic generator plants a three-day quality-to-CAC relationship, while the statistically selected VAR order is five because it jointly evaluates history through that order.
+- Options considered: Display five days as the business delay; force the test to three days; disclose the selected order's actual interpretation.
+- Choice made: Display “five days” only as selected model history and keep the data-generation lag in test-fixture documentation.
+- Rationale: This distinguishes a joint predictive test configuration from a causal or point-delay claim and preserves the BIC guardrail rather than tailoring the method to the demo.
+- Trade-offs accepted: The executive UI is more statistically precise but requires a short explanation.
+- Revisit trigger: A future lag-specific effect decomposition is validated and can be presented without overstating certainty.
+
+#### Decision: Synchronize the canonical Python fixture and reconcile stale current-engine evidence
+
+- Decision: Keep the SQL Editor script as a bootstrap fallback, then use the server-side Supabase Data API to upsert the exact canonical Python fixture before signal analysis; delete prior evidence for the same test-configuration version before inserting the current run.
+- Context: The dashboard SQL fallback's smooth deterministic substitutes caused 15 accepted signals, including a declared negative control, whereas the canonical seeded generator produces four corrected signals and rejects both controls.
+- Options considered: Weaken the q threshold; blacklist the failed control; rerun the SQL fallback with a tuned formula; synchronize the canonical fixture and remove stale evidence.
+- Choice made: Synchronize all 1,620 canonical events in 100-row idempotent batches and reconcile the current engine-version evidence on every analysis run.
+- Rationale: The corrected data produced four persisted signals and restored both negative controls, without changing the statistical threshold or hiding failed evidence.
+- Trade-offs accepted: Current-engine evidence history is replaced rather than retained as a full analysis-run lineage. This is safe before recommendations and scenario records reference signal IDs, but it is not a production audit-history design.
+- Revisit trigger: Before a later phase creates dependent records, add analysis-run versioning and stale/superseded evidence state instead of deleting prior rows.
+
+#### Decision: Compute and persist `confidence_v1` independently of narrative systems
+
+- Decision: Score accepted evidence with 40% adjusted-significance strength, 25% standardized incremental effect, 20% sample adequacy, and 15% synthetic-event recency; persist all four components with the score.
+- Context: The user must be able to audit why the primary evidence receives 99.33 confidence without an LLM altering the calculation.
+- Options considered: A single opaque score; a free-form model confidence; a versioned formula with persisted components.
+- Choice made: The versioned deterministic formula, normalized with -log10(q) capped at four, delta-R-squared capped at 0.25, 180-event sample adequacy, and a synthetic event-time recency reference.
+- Rationale: Repeated real runs produced identical fingerprints and scores, so the dashboard and later GPT narration have a stable evidence boundary.
+- Trade-offs accepted: The normalization constants are calibrated for this 180-day synthetic fixture and need empirical recalibration for governed production data.
+- Revisit trigger: Backtesting on representative history produces a documented calibration curve or shows that confidence is systematically miscalibrated.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.

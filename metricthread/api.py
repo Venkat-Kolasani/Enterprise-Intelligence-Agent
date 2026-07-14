@@ -7,9 +7,15 @@ from dataclasses import asdict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from metricthread.live_pipeline import LivePipeline, cold_store_from_environment
+from metricthread.signal_repository import signal_repository_from_environment
+from metricthread.signals import SignalRepository
 from metricthread.streams import UpstashRedisStream
+
+
+load_dotenv()
 
 
 class AgentRuntime:
@@ -61,17 +67,18 @@ def runtime_from_environment() -> AgentRuntime:
     return AgentRuntime(LivePipeline(stream, cold_store_from_environment()))
 
 
-def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
+def create_app(runtime: AgentRuntime | None = None, signal_repository: SignalRepository | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.runtime = runtime or runtime_from_environment()
+        app.state.signal_repository = signal_repository
         yield
         await app.state.runtime.stop()
 
     app = FastAPI(title="MetricThread", version="0.2.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173"],
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
@@ -82,7 +89,7 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         return {
             **status,
             "anomaly_state": "watching",
-            "signal_state": "pending deterministic analysis in Phase 3",
+            "signal_state": "deterministic analysis available",
             "simulation_label": "synthetic live simulation",
         }
 
@@ -102,9 +109,35 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             "status": asdict(app.state.runtime.pipeline.status()),
         }
 
+    def repository() -> SignalRepository:
+        configured_repository = app.state.signal_repository
+        if configured_repository is None:
+            configured_repository = signal_repository_from_environment()
+            app.state.signal_repository = configured_repository
+        return configured_repository
+
+    @app.get("/signals")
+    def signals() -> dict[str, object]:
+        return {
+            "simulation_label": "synthetic live simulation",
+            "evidence_language": "Predictive lead-lag evidence; not proof of causation.",
+            "signals": [signal.as_public_dict() for signal in repository().list_accepted()],
+        }
+
+    @app.post("/signals/run")
+    async def run_signals() -> dict[str, object]:
+        report = await asyncio.to_thread(repository().run_analysis)
+        return {
+            "simulation_label": "synthetic live simulation",
+            "candidate_count": report.candidate_count,
+            "accepted_count": len(report.accepted),
+            "rejected_count": len(report.rejected),
+            "signals": [signal.as_public_dict() for signal in report.accepted],
+        }
+
     @app.get("/insights")
     def insights_placeholder() -> None:
-        raise HTTPException(status_code=501, detail="Insights begin in Phase 3 after deterministic evidence is available")
+        raise HTTPException(status_code=501, detail="Insights begin in Phase 4 after grounded reasoning is available")
 
     return app
 
