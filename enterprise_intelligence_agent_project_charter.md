@@ -486,6 +486,44 @@ Schema inspection confirmed the database enforces the `entity_resolution_map (so
 - Trade-offs accepted: The fallback's deterministic SQL values are implementation-equivalent but not byte-for-byte identical to Python's seeded pseudo-random values; the Python generator remains the canonical application-side fixture.
 - Revisit trigger: Restore the automated integration fixture as the authoritative deployed-database test when pooler connectivity is available from the build environment.
 
+### Phase 2 Live Pipeline Results — 2026-07-14
+
+The Phase 2 implementation added an Upstash Redis Stream, independent `metricthread-hot` and `metricthread-cold` consumer groups, a 90-event hot rolling window, an idempotent Supabase Data API cold sink, recovery via `XAUTOCLAIM`, and a React/Vite status rail backed by `GET /agent/status`, `GET /metrics/live`, and `POST /simulation/start`. The simulator emits one labelled synthetic day (nine events) every five seconds. A distinct worker polls while the simulation is active so dashboard visibility is not delayed by the simulator cadence.
+
+The live reliability rehearsal invoked `uv run python -m scripts.phase2_rehearsal` with a unique temporary Stream. It injected 600 events over exactly 120.00 seconds (5.00 events/second), recorded 600 hot-path deliveries and 600 durable cold-path writes, left zero pending entries in both consumer groups, and measured p95 hot visibility at 719.55 ms and p95 cold persistence at 1,231.95 ms. The temporary Stream was deleted after the run. Before the server-side Supabase key was configured, an intentional cold-path failure left events unacknowledged in the cold consumer group's pending-entry list while the hot group remained fully acknowledged; this behavior is covered by the automated negative-control test and was visible in the status rail rather than becoming a silent drop. A first live status request initially attempted to query pending counts before groups existed and returned HTTP 500; the implementation was corrected to report zero pending before the simulator starts, then rechecked successfully.
+
+The root test command returned `8 passed, 1 skipped` plus one upstream FastAPI TestClient deprecation warning, and the React production build succeeded. The skipped integration fixture remains the unavailable raw Postgres TCP path. The Data API preflight and the full cold-write rehearsal both succeeded with a server-only Supabase secret key; no credentials were added to the repository. Groundedness is not applicable until the Phase 4 reasoning layer. The running React dashboard was verified in a browser: it loaded without a Vite error overlay, exposed the Start simulation control, transitioned to Monitoring 9 business metrics, and rendered all nine metric cards after live events arrived.
+
+#### Decision: Use one capped Redis Stream with two independent consumer groups and acknowledge only completed work
+
+- Decision: Use `metricthread:events` with approximate `MAXLEN ~ 2000` retention, separate hot and cold consumer groups, acknowledgement after hot-state application or durable cold persistence, and `XAUTOCLAIM` recovery after 60 seconds idle.
+- Context: The Phase 2 pipeline must make every event independently visible to the low-latency dashboard and durable store without silent loss when a consumer fails.
+- Options considered: Redis Pub/Sub; one shared consumer group; two independent Redis Stream groups; a Kafka deployment.
+- Choice made: Two independent Redis Stream consumer groups with non-blocking REST polling, pending-entry tracking, and recovery.
+- Rationale: The measured 600-event rehearsal delivered all events to both paths with zero pending entries after drain. Keeping an event pending on cold-write failure makes recovery observable and testable rather than dropping data.
+- Trade-offs accepted: The capped Stream is a bounded demo retention log rather than a long-term enterprise replay system, and REST polling is active only during the synthetic simulation to conserve free-tier command usage.
+- Revisit trigger: Consumer concurrency, retention needs, or sustained production traffic require partitioned durable replay infrastructure such as Kafka.
+
+#### Decision: Separate one-second stream processing from the five-second synthetic simulator cadence
+
+- Decision: Run the bounded consumer worker every second while the simulator emits a compressed synthetic day every five seconds.
+- Context: Tying processing to simulator emissions could produce dashboard visibility near five seconds, violating the two-second Phase 2 target.
+- Options considered: Process only after each simulated day; use a permanent blocking read; use a bounded worker loop independent of emission.
+- Choice made: A one-second worker loop using non-blocking `XREADGROUP`, with recovery scans bounded to the configured idle interval.
+- Rationale: The live rehearsal achieved 719.55 ms p95 hot visibility while retaining the required five-second visual simulator cadence. Upstash REST does not support blocking `XREADGROUP`.
+- Trade-offs accepted: Polling incurs command costs during an active demo, so the worker is not left running after the finite simulation completes.
+- Revisit trigger: A deployed workload needs always-on monitoring or the free-tier command budget is exceeded.
+
+#### Decision: Use the server-side Supabase Data API sink when direct Postgres TCP is unavailable
+
+- Decision: Prefer `SUPABASE_URL` plus `SUPABASE_SECRET_KEY` for the backend cold sink when configured, otherwise fall back to `DATABASE_URL` through psycopg.
+- Context: The Supabase SQL Editor and Data API were healthy, but raw Postgres TCP connections from the build environment were reset before authentication.
+- Options considered: Treat cold writes as successful without storage; wait for TCP connectivity; use the server-side Supabase Data API with idempotent natural-key upserts.
+- Choice made: A backend-only Data API sink using `on_conflict=entity_id,metric_name,event_time,source_system` and merge-duplicate preference.
+- Rationale: The preflight read and 600-event durable-write rehearsal succeeded without exposing a key to the React client or repository. Natural-key upserts tolerate simulator replay and preserve idempotency even when an existing synthetic row has a different UUID.
+- Trade-offs accepted: A secret key bypasses Row Level Security and must be protected as deployment-only configuration; the demo is single-tenant and has no user authorization model yet.
+- Revisit trigger: Production authentication, tenant isolation, or a reliably reachable Postgres connection changes the appropriate persistence boundary.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.
