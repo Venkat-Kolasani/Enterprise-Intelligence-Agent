@@ -4,11 +4,22 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
+from metricthread.insight_repository import insight_store_from_environment
+from metricthread.insights import (
+    GroundedInsightService,
+    InsightStore,
+    NarrativeGenerator,
+    narrative_generator_from_environment,
+)
 from metricthread.live_pipeline import LivePipeline, cold_store_from_environment
 from metricthread.signal_repository import signal_repository_from_environment
 from metricthread.signals import SignalRepository
@@ -16,6 +27,18 @@ from metricthread.streams import UpstashRedisStream
 
 
 load_dotenv()
+
+
+class RecommendationStatusRequest(BaseModel):
+    status: Literal["proposed", "planned", "implemented"]
+
+
+class OutcomeRequest(BaseModel):
+    implemented_at: datetime
+    outcome_metric: str = Field(min_length=1, max_length=120)
+    outcome_value: float
+    measured_at: datetime
+    notes: str = Field(default="", max_length=2_000)
 
 
 class AgentRuntime:
@@ -67,11 +90,19 @@ def runtime_from_environment() -> AgentRuntime:
     return AgentRuntime(LivePipeline(stream, cold_store_from_environment()))
 
 
-def create_app(runtime: AgentRuntime | None = None, signal_repository: SignalRepository | None = None) -> FastAPI:
+def create_app(
+    runtime: AgentRuntime | None = None,
+    signal_repository: SignalRepository | None = None,
+    insight_store: InsightStore | None = None,
+    narrative_generator: NarrativeGenerator | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.runtime = runtime or runtime_from_environment()
         app.state.signal_repository = signal_repository
+        app.state.insight_store = insight_store
+        app.state.narrative_generator = narrative_generator
+        app.state.grounded_insight_service = None
         yield
         await app.state.runtime.stop()
 
@@ -116,6 +147,21 @@ def create_app(runtime: AgentRuntime | None = None, signal_repository: SignalRep
             app.state.signal_repository = configured_repository
         return configured_repository
 
+    def insights_store() -> InsightStore:
+        configured_store = app.state.insight_store
+        if configured_store is None:
+            configured_store = insight_store_from_environment()
+            app.state.insight_store = configured_store
+        return configured_store
+
+    def grounded_insight_service() -> GroundedInsightService:
+        service = app.state.grounded_insight_service
+        if service is None:
+            generator = app.state.narrative_generator or narrative_generator_from_environment()
+            service = GroundedInsightService(repository(), insights_store(), generator)
+            app.state.grounded_insight_service = service
+        return service
+
     @app.get("/signals")
     def signals() -> dict[str, object]:
         return {
@@ -136,8 +182,76 @@ def create_app(runtime: AgentRuntime | None = None, signal_repository: SignalRep
         }
 
     @app.get("/insights")
-    def insights_placeholder() -> None:
-        raise HTTPException(status_code=501, detail="Insights begin in Phase 4 after grounded reasoning is available")
+    def insights() -> dict[str, object]:
+        recommendations_by_insight: dict[UUID, list[dict[str, object]]] = {}
+        for recommendation in insights_store().list_recommendations():
+            recommendations_by_insight.setdefault(recommendation.insight_id, []).append(
+                recommendation.as_public_dict()
+            )
+        return {
+            "simulation_label": "synthetic live simulation",
+            "insights": [
+                {
+                    **insight.as_public_dict(),
+                    "recommendations": recommendations_by_insight.get(insight.id, []),
+                }
+                for insight in insights_store().list_insights()
+            ],
+        }
+
+    @app.get("/insights/{insight_id}")
+    def insight_detail(insight_id: UUID) -> dict[str, object]:
+        for insight in insights()["insights"]:
+            if insight["id"] == str(insight_id):
+                return {"simulation_label": "synthetic live simulation", "insight": insight}
+        raise HTTPException(status_code=404, detail="Insight was not found")
+
+    @app.post("/insights/generate")
+    async def generate_insight() -> dict[str, object]:
+        generated = await asyncio.to_thread(grounded_insight_service().generate_next)
+        if generated is None:
+            return {
+                "generated": False,
+                "reason": "No newly accepted or materially changed signal requires a GPT narrative.",
+            }
+        return {
+            "generated": True,
+            "simulation_label": "synthetic live simulation",
+            "insight": {
+                **generated.insight.as_public_dict(),
+                "recommendations": [generated.recommendation.as_public_dict()],
+            },
+            "source_signal_id": str(generated.source_signal.id),
+        }
+
+    @app.post("/recommendations/{recommendation_id}/status")
+    def update_recommendation_status(
+        recommendation_id: UUID, request: RecommendationStatusRequest
+    ) -> dict[str, object]:
+        try:
+            recommendation = insights_store().update_recommendation_status(recommendation_id, request.status)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"recommendation": recommendation.as_public_dict()}
+
+    @app.post("/recommendations/{recommendation_id}/outcomes")
+    def record_recommendation_outcome(
+        recommendation_id: UUID, request: OutcomeRequest
+    ) -> dict[str, object]:
+        try:
+            recommendation = insights_store().record_outcome(
+                recommendation_id,
+                implemented_at=request.implemented_at,
+                outcome_metric=request.outcome_metric.strip(),
+                outcome_value=request.outcome_value,
+                measured_at=request.measured_at,
+                notes=request.notes.strip(),
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {"recommendation": recommendation.as_public_dict()}
 
     return app
 

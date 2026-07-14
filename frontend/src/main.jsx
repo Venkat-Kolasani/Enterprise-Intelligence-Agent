@@ -29,10 +29,15 @@ function App() {
   const [status, setStatus] = useState(null)
   const [metrics, setMetrics] = useState([])
   const [signals, setSignals] = useState([])
+  const [insights, setInsights] = useState([])
   const [error, setError] = useState(null)
   const [starting, setStarting] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [signalError, setSignalError] = useState(null)
+  const [decisionError, setDecisionError] = useState(null)
+  const [statusDrafts, setStatusDrafts] = useState({})
+  const [outcomeDrafts, setOutcomeDrafts] = useState({})
 
   const refresh = useCallback(async () => {
     try {
@@ -52,6 +57,13 @@ function App() {
       setSignalError(null)
     } catch (requestError) {
       setSignalError(requestError.message)
+    }
+    try {
+      const nextInsights = await getJson('/insights')
+      setInsights(nextInsights.insights)
+      setDecisionError(null)
+    } catch (requestError) {
+      setDecisionError(requestError.message)
     }
   }, [])
 
@@ -87,6 +99,60 @@ function App() {
     }
   }
 
+  async function generateInsight() {
+    setGenerating(true)
+    try {
+      await getJson('/insights/generate', { method: 'POST' })
+      await refresh()
+    } catch (requestError) {
+      setDecisionError(requestError.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function updateRecommendationStatus(recommendation) {
+    const status = statusDrafts[recommendation.id] ?? recommendation.status
+    try {
+      await getJson(`/recommendations/${recommendation.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      await refresh()
+    } catch (requestError) {
+      setDecisionError(requestError.message)
+    }
+  }
+
+  function updateOutcomeDraft(recommendationId, field, value) {
+    setOutcomeDrafts((drafts) => ({
+      ...drafts,
+      [recommendationId]: { ...drafts[recommendationId], [field]: value },
+    }))
+  }
+
+  async function recordOutcome(event, recommendation) {
+    event.preventDefault()
+    const draft = outcomeDrafts[recommendation.id] ?? {}
+    try {
+      await getJson(`/recommendations/${recommendation.id}/outcomes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          implemented_at: new Date().toISOString(),
+          outcome_metric: draft.metric ?? 'client_acquisition_cost',
+          outcome_value: Number(draft.value ?? 0),
+          measured_at: new Date().toISOString(),
+          notes: draft.notes ?? '',
+        }),
+      })
+      await refresh()
+    } catch (requestError) {
+      setDecisionError(requestError.message)
+    }
+  }
+
   const isRunning = status?.simulation_state === 'running'
   const coldBlocked = Boolean(status?.last_cold_error)
 
@@ -111,6 +177,9 @@ function App() {
           <h2>{isRunning ? 'Monitoring 9 business metrics' : 'Ready to monitor 9 business metrics'}</h2>
         </div>
         <div className="control-actions">
+          <button type="button" onClick={generateInsight} disabled={generating || signals.length === 0} className="secondary-action">
+            {generating ? 'Generating…' : 'Generate grounded recommendation'}
+          </button>
           <button type="button" onClick={runSignalAnalysis} disabled={analyzing} className="secondary-action">
             {analyzing ? 'Analyzing…' : 'Run evidence analysis'}
           </button>
@@ -129,6 +198,11 @@ function App() {
       {signalError && (
         <p className="warning" role="status">
           Evidence analysis is unavailable: {signalError}
+        </p>
+      )}
+      {decisionError && (
+        <p className="warning" role="status">
+          Grounded recommendation workflow is unavailable: {decisionError}
         </p>
       )}
 
@@ -215,7 +289,92 @@ function App() {
         </p>
       </section>
 
-      <footer>All values are labelled synthetic. Recommendations remain unavailable until the grounded reasoning phase.</footer>
+      <section className="recommendation-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Agent recommendation</p>
+            <h2>Human-controlled decision tracking</h2>
+          </div>
+          <span>{insights.length} grounded insight{insights.length === 1 ? '' : 's'}</span>
+        </div>
+        {insights.length === 0 ? (
+          <p className="empty-state">Generate one grounded recommendation from a newly accepted evidence signal. The agent cannot execute actions.</p>
+        ) : (
+          <div className="recommendation-grid">
+            {insights.map((insight) => (
+              <article className="recommendation-card" key={insight.id}>
+                <p className="eyebrow">{insight.domains.join(' / ')} · confidence {Number(insight.confidence_score).toFixed(1)}</p>
+                <h3>{insight.title}</h3>
+                <p className="narrative">{insight.narrative_text}</p>
+                <p className="evidence-id">Evidence: {insight.related_signal_ids.map((id) => id.slice(0, 8)).join(', ')}</p>
+                {insight.recommendations.map((recommendation) => {
+                  const draft = outcomeDrafts[recommendation.id] ?? {}
+                  return (
+                    <div className="recommendation-action" key={recommendation.id}>
+                      <h4>Proposed action</h4>
+                      <p>{recommendation.recommendation_text}</p>
+                      <p className="impact">{recommendation.predicted_impact.statement}</p>
+                      <div className="lifecycle-row">
+                        <label>
+                          Lifecycle
+                          <select
+                            value={statusDrafts[recommendation.id] ?? recommendation.status}
+                            onChange={(event) => setStatusDrafts((drafts) => ({ ...drafts, [recommendation.id]: event.target.value }))}
+                          >
+                            <option value="proposed">Proposed</option>
+                            <option value="planned">Planned</option>
+                            <option value="implemented">Implemented</option>
+                          </select>
+                        </label>
+                        <button type="button" className="secondary-action" onClick={() => updateRecommendationStatus(recommendation)}>
+                          Save status
+                        </button>
+                      </div>
+                      {recommendation.status === 'implemented' && (
+                        recommendation.outcome ? (
+                          <p className="outcome-summary">
+                            Outcome: {recommendation.outcome.outcome_metric} = {recommendation.outcome.outcome_value}
+                          </p>
+                        ) : (
+                          <form className="outcome-form" onSubmit={(event) => recordOutcome(event, recommendation)}>
+                            <label>
+                              Outcome metric
+                              <input
+                                value={draft.metric ?? 'client_acquisition_cost'}
+                                onChange={(event) => updateOutcomeDraft(recommendation.id, 'metric', event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              Measured value
+                              <input
+                                type="number"
+                                step="any"
+                                value={draft.value ?? ''}
+                                onChange={(event) => updateOutcomeDraft(recommendation.id, 'value', event.target.value)}
+                                required
+                              />
+                            </label>
+                            <label>
+                              Notes
+                              <input
+                                value={draft.notes ?? ''}
+                                onChange={(event) => updateOutcomeDraft(recommendation.id, 'notes', event.target.value)}
+                              />
+                            </label>
+                            <button type="submit">Record outcome</button>
+                          </form>
+                        )
+                      )}
+                    </div>
+                  )
+                })}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <footer>All values are labelled synthetic. Recommendations are grounded in persisted evidence and remain human-controlled.</footer>
     </main>
   )
 }

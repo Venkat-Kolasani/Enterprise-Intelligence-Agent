@@ -8,6 +8,9 @@ export default defineConfig({
       '/agent': 'http://localhost:8000',
       '/metrics': 'http://localhost:8000',
       '/simulation': 'http://localhost:8000',
+      '/signals': 'http://localhost:8000',
+      '/insights': 'http://localhost:8000',
+      '/recommendations': 'http://localhost:8000',
     },
   },
 })

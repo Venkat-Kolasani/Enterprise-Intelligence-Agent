@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from metricthread.api import AgentRuntime, create_app
+from metricthread.insights import GroundedNarrative, InMemoryInsightStore
 from metricthread.live_pipeline import InMemoryColdStore, LivePipeline
 from metricthread.signals import InMemorySignalRepository, observations_from_metric_events
 from metricthread.streams import InMemoryStream
@@ -52,3 +53,67 @@ def test_signal_endpoints_return_only_persisted_deterministic_evidence() -> None
     )
     assert primary["adjusted_q_value"] <= 0.05
     assert primary["test_metadata"]["lag_interpretation"] == "BIC-selected model history, not a causal delay claim"
+
+
+def test_grounded_insight_and_recommendation_lifecycle_endpoints() -> None:
+    class SingleSignalRepository:
+        def __init__(self, signal):
+            self._signal = signal
+
+        def list_accepted(self):
+            return [self._signal]
+
+        def run_analysis(self):
+            raise AssertionError("not used by this test")
+
+    class Narrator:
+        def generate(self, signal):
+            signal_id = str(signal.id)
+            return GroundedNarrative(
+                signal_id=signal_id,
+                title="Predictive partner-quality signal",
+                narrative="This predictive lead-lag evidence is consistent with higher acquisition cost in the synthetic live simulation.",
+                recommendation="Propose a human review before any partner-program action.",
+                predicted_impact="Any impact remains predictive and must be measured after implementation.",
+                evidence_signal_ids=(signal_id,),
+            )
+
+    dataset = generate_dataset(resolve_exact_keys(foundation_source_records()))
+    signal = next(
+        item
+        for item in InMemorySignalRepository(observations_from_metric_events(dataset.events)).run_analysis().accepted
+        if item.metric_a == "partner_referral_quality" and item.metric_b == "client_acquisition_cost"
+    )
+    pipeline = LivePipeline(InMemoryStream(), InMemoryColdStore(), consumer_name="insight-api-test")
+    app = create_app(
+        AgentRuntime(pipeline, interval_seconds=60),
+        SingleSignalRepository(signal),
+        InMemoryInsightStore(),
+        Narrator(),
+    )
+
+    with TestClient(app) as client:
+        generated = client.post("/insights/generate")
+        insight = generated.json()["insight"]
+        recommendation_id = insight["recommendations"][0]["id"]
+        planned = client.post(f"/recommendations/{recommendation_id}/status", json={"status": "planned"})
+        implemented = client.post(f"/recommendations/{recommendation_id}/status", json={"status": "implemented"})
+        outcome = client.post(
+            f"/recommendations/{recommendation_id}/outcomes",
+            json={
+                "implemented_at": "2026-06-30T00:00:00Z",
+                "outcome_metric": "client_acquisition_cost",
+                "outcome_value": 121.4,
+                "measured_at": "2026-07-07T00:00:00Z",
+                "notes": "Synthetic lifecycle test.",
+            },
+        )
+        listed = client.get("/insights")
+
+    assert generated.status_code == 200
+    assert generated.json()["generated"] is True
+    assert planned.json()["recommendation"]["status"] == "planned"
+    assert implemented.json()["recommendation"]["status"] == "implemented"
+    assert outcome.status_code == 200
+    assert outcome.json()["recommendation"]["outcome"]["outcome_metric"] == "client_acquisition_cost"
+    assert listed.json()["insights"][0]["recommendations"][0]["outcome"] is not None
