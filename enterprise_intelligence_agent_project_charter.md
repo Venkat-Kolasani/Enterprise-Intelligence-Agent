@@ -460,6 +460,32 @@ Research sources: [Devpost challenge requirements](https://openai.devpost.com/),
 - Trade-offs accepted: External infrastructure and later features wait for the documented gate rather than being pre-built speculatively.
 - Revisit trigger: The user explicitly changes the approval workflow or the deadline makes the documented process impossible to complete.
 
+### Phase 1 Foundation Results — 2026-07-14
+
+The Supabase `public` schema contains all nine planned tables. The manually applied, idempotent seed loaded three canonical entities, six exact-key source mappings, and 1,620 synthetic daily metric events from 2026-01-01 through 2026-06-29. The persisted primary check paired 177 days and measured a three-day lagged Pearson correlation of -0.9953 from partner referral quality to client acquisition cost. The declared negative controls remained weak: partner active rate to recognized revenue was 0.0288, and partner incentive budget to qualified leads was -0.0396. Each canonical entity had exactly two source mappings at confidence 1.0.
+
+Schema inspection confirmed the database enforces the `entity_resolution_map (source_system, source_id)` unique constraint, the `metric_events (entity_id, metric_name, event_time, source_system)` unique constraint, both required entity foreign keys, non-empty source and metric fields, a 0-to-1 entity-match confidence, and JSON-object dimensions. The local test command returned `4 passed, 1 skipped`; the skipped test is the external database integration fixture because the Supabase Shared Pooler closed connections from this environment before authentication. The same schema, seed, and data-quality checks were instead executed through the Supabase SQL Editor and their actual results are recorded above. Latency/reliability is not applicable until the Phase 2 streaming path exists, and groundedness is not applicable until the Phase 4 reasoning layer exists.
+
+#### Decision: Use deterministic South-region synthetic signals with explicit negative controls
+
+- Decision: Seed 180 days of nine synthetic metrics across Client, Financial, and Partner domains, with partner referral quality leading client acquisition cost by three days and two declared unrelated controls.
+- Context: Phase 1 requires reproducible data that can demonstrate a non-trivial cross-domain relationship without implying real enterprise behavior or causality.
+- Options considered: Random independent series; a public business dataset with unknown ground truth; deterministic synthetic series with declared signal and control pairs.
+- Choice made: Deterministic synthetic series labelled with `simulation: synthetic`, plus the primary relationship and two negative controls verified against the persisted data.
+- Rationale: The primary relationship was strongly detectable at -0.9953 over 177 paired days while both controls remained near zero, making later statistical-engine behavior testable. These values are an evaluation fixture and evidence of a predictive lead-lag pattern, not proof of a real-world causal mechanism.
+- Trade-offs accepted: The deliberately clear synthetic relationship is stronger and cleaner than real enterprise data, so the demo illustrates auditability rather than production predictive accuracy.
+- Revisit trigger: Replace or recalibrate the generator when governed representative data and a documented backtesting protocol are available.
+
+#### Decision: Add an idempotent SQL Editor seed fallback for the Phase 1 manual gate
+
+- Decision: Add `db/seed_foundation.sql` as a Supabase SQL Editor fallback while retaining the Python migration and seed path as the normal application path.
+- Context: The external Shared Pooler resolved but closed connections from this Codex environment before authentication, while the Supabase SQL Editor successfully executed the same schema and seed operations.
+- Options considered: Wait indefinitely for pooler access; bypass Supabase verification; provide an idempotent SQL Editor fallback alongside the application seed code.
+- Choice made: Use the SQL Editor fallback only to execute and verify the Phase 1 database setup, with stable synthetic labels and natural-key upserts to make reruns safe.
+- Rationale: It preserves the real Supabase deployment, provides direct database constraint evidence, and avoids storing credentials or weakening the schema solely to accommodate a connectivity issue.
+- Trade-offs accepted: The fallback's deterministic SQL values are implementation-equivalent but not byte-for-byte identical to Python's seeded pseudo-random values; the Python generator remains the canonical application-side fixture.
+- Revisit trigger: Restore the automated integration fixture as the authoritative deployed-database test when pooler connectivity is available from the build environment.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.
