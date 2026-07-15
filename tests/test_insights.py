@@ -71,8 +71,12 @@ def test_grounded_service_generates_once_for_a_new_signal_and_tracks_human_lifec
     assert service.generate_next() is None
     assert narrator.calls == 1
 
+    with pytest.raises(ValueError, match="cannot transition"):
+        store.update_recommendation_status(generated.recommendation.id, "implemented")
     planned = store.update_recommendation_status(generated.recommendation.id, "planned")
     implemented = store.update_recommendation_status(planned.id, "implemented")
+    with pytest.raises(ValueError, match="cannot transition"):
+        store.update_recommendation_status(implemented.id, "planned")
     outcome = store.record_outcome(
         implemented.id,
         implemented_at=implemented.created_at,

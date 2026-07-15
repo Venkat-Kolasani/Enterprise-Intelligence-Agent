@@ -2,14 +2,19 @@ import { useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? ''
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 async function getJson(path, options) {
   const response = await fetch(`${apiBase}${path}`, options)
+  const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`)
+    const detail = typeof payload?.detail === 'string' ? payload.detail : null
+    throw new Error(detail ?? `Request failed (${response.status})`)
   }
-  return response.json()
+  if (payload === null) {
+    throw new Error('The server returned an empty response.')
+  }
+  return payload
 }
 
 function StateCard({ label, value, detail, tone = 'neutral' }) {
@@ -40,6 +45,7 @@ function App() {
   const [statusDrafts, setStatusDrafts] = useState({})
   const [outcomeDrafts, setOutcomeDrafts] = useState({})
   const [briefingResult, setBriefingResult] = useState(null)
+  const [latestBriefing, setLatestBriefing] = useState(null)
   const [briefingBusy, setBriefingBusy] = useState(false)
   const [chatQuestion, setChatQuestion] = useState('Why is CAC rising?')
   const [chatResult, setChatResult] = useState(null)
@@ -73,6 +79,12 @@ function App() {
       setDecisionError(null)
     } catch (requestError) {
       setDecisionError(requestError.message)
+    }
+    try {
+      const latest = await getJson('/briefings/latest')
+      setLatestBriefing(latest.briefing)
+    } catch (requestError) {
+      setExecutiveError(requestError.message)
     }
   }, [])
 
@@ -220,6 +232,7 @@ function App() {
 
   const isRunning = status?.simulation_state === 'running'
   const coldBlocked = Boolean(status?.last_cold_error)
+  const readOnlyDemo = status?.demo_access === 'read_only'
 
   return (
     <main>
@@ -242,10 +255,10 @@ function App() {
           <h2>{isRunning ? 'Monitoring 9 business metrics' : 'Ready to monitor 9 business metrics'}</h2>
         </div>
         <div className="control-actions">
-          <button type="button" onClick={generateInsight} disabled={generating || signals.length === 0} className="secondary-action">
+          <button type="button" onClick={generateInsight} disabled={readOnlyDemo || generating || signals.length === 0} className="secondary-action">
             {generating ? 'Generating…' : 'Generate grounded recommendation'}
           </button>
-          <button type="button" onClick={runSignalAnalysis} disabled={analyzing} className="secondary-action">
+          <button type="button" onClick={runSignalAnalysis} disabled={readOnlyDemo || analyzing} className="secondary-action">
             {analyzing ? 'Analyzing…' : 'Run evidence analysis'}
           </button>
           <button type="button" onClick={startSimulation} disabled={isRunning || starting}>
@@ -275,8 +288,13 @@ function App() {
           Executive workflow is unavailable: {executiveError}
         </p>
       )}
+      {readOnlyDemo && (
+        <p className="warning" role="status">
+          Read-only judge demo: persisted recommendations, analysis, and briefings are protected. Scenario forecasts remain ephemeral.
+        </p>
+      )}
 
-      <section className="status-grid" aria-live="polite">
+      <section className="status-grid">
         <StateCard label="Ingestion" value={status?.simulation_state ?? 'connecting'} detail={`${status?.stream_length ?? 0} retained events`} tone={isRunning ? 'healthy' : 'neutral'} />
         <StateCard label="Hot path" value={`${status?.hot_events_processed ?? 0} processed`} detail={`${status?.p95_hot_visibility_ms ?? '—'} ms p95 · ${status?.hot_pending ?? 0} pending`} tone="healthy" />
         <StateCard label="Cold path" value={`${status?.cold_events_persisted ?? 0} durable`} detail={`${status?.p95_cold_persistence_ms ?? '—'} ms p95 · ${status?.cold_pending ?? 0} pending`} tone={coldBlocked ? 'warning' : 'healthy'} />
@@ -389,6 +407,7 @@ function App() {
                           Lifecycle
                           <select
                             value={statusDrafts[recommendation.id] ?? recommendation.status}
+                            disabled={readOnlyDemo}
                             onChange={(event) => setStatusDrafts((drafts) => ({ ...drafts, [recommendation.id]: event.target.value }))}
                           >
                             <option value="proposed">Proposed</option>
@@ -396,7 +415,7 @@ function App() {
                             <option value="implemented">Implemented</option>
                           </select>
                         </label>
-                        <button type="button" className="secondary-action" onClick={() => updateRecommendationStatus(recommendation)}>
+                        <button type="button" className="secondary-action" onClick={() => updateRecommendationStatus(recommendation)} disabled={readOnlyDemo}>
                           Save status
                         </button>
                       </div>
@@ -411,6 +430,7 @@ function App() {
                               Outcome metric
                               <input
                                 value={draft.metric ?? 'client_acquisition_cost'}
+                                disabled={readOnlyDemo}
                                 onChange={(event) => updateOutcomeDraft(recommendation.id, 'metric', event.target.value)}
                               />
                             </label>
@@ -420,6 +440,7 @@ function App() {
                                 type="number"
                                 step="any"
                                 value={draft.value ?? ''}
+                                disabled={readOnlyDemo}
                                 onChange={(event) => updateOutcomeDraft(recommendation.id, 'value', event.target.value)}
                                 required
                               />
@@ -428,10 +449,11 @@ function App() {
                               Notes
                               <input
                                 value={draft.notes ?? ''}
+                                disabled={readOnlyDemo}
                                 onChange={(event) => updateOutcomeDraft(recommendation.id, 'notes', event.target.value)}
                               />
                             </label>
-                            <button type="submit">Record outcome</button>
+                            <button type="submit" disabled={readOnlyDemo}>Record outcome</button>
                           </form>
                         )
                       )}
@@ -456,9 +478,20 @@ function App() {
           <article className="executive-card">
             <p className="eyebrow">Morning briefing</p>
             <h3>New material, on demand</h3>
-            <button type="button" className="secondary-action" onClick={generateBriefing} disabled={briefingBusy}>
-              {briefingBusy ? 'Generating…' : 'Generate executive briefing'}
-            </button>
+            {!readOnlyDemo && (
+              <button type="button" className="secondary-action" onClick={generateBriefing} disabled={briefingBusy}>
+                {briefingBusy ? 'Generating…' : 'Generate executive briefing'}
+              </button>
+            )}
+            {readOnlyDemo && latestBriefing && (
+              <div className="executive-result">
+                <p>{latestBriefing.summary_text}</p>
+                <small>Insight IDs: {latestBriefing.insight_ids.map((id) => id.slice(0, 8)).join(', ')}</small>
+              </div>
+            )}
+            {readOnlyDemo && !latestBriefing && (
+              <p className="empty-inline">No persisted executive briefing is available yet.</p>
+            )}
             {briefingResult && (
               briefingResult.generated ? (
                 <div className="executive-result">

@@ -8,7 +8,12 @@ from uuid import UUID, uuid5
 import httpx
 from dotenv import load_dotenv
 
-from metricthread.insights import InsightRecord, InsightStore, RecommendationRecord, RECOMMENDATION_STATUSES
+from metricthread.insights import (
+    InsightRecord,
+    InsightStore,
+    RecommendationRecord,
+    validate_recommendation_transition,
+)
 
 
 OUTCOME_NAMESPACE = UUID("af68a735-1845-4e89-8f7c-c0fe043b5c31")
@@ -38,42 +43,44 @@ class SupabaseInsightStore:
         ]
 
     def persist_generated(self, insight: InsightRecord, recommendation: RecommendationRecord) -> None:
-        self._post(
-            "insights",
+        self._rpc(
+            "persist_grounded_insight",
             {
-                "id": str(insight.id),
-                "title": insight.title,
-                "narrative_text": insight.narrative_text,
-                "related_signal_ids": list(insight.related_signal_ids),
-                "confidence_score": insight.confidence_score,
-                "domains": list(insight.domains),
-                "status": insight.status,
-                "generated_at": insight.generated_at.isoformat(),
-            },
-        )
-        self._post(
-            "recommendations",
-            {
-                "id": str(recommendation.id),
-                "insight_id": str(recommendation.insight_id),
-                "recommendation_text": recommendation.recommendation_text,
-                "predicted_impact": recommendation.predicted_impact,
-                "confidence_score": recommendation.confidence_score,
-                "status": recommendation.status,
-                "created_at": recommendation.created_at.isoformat(),
+                "insight_payload": {
+                    "id": str(insight.id),
+                    "title": insight.title,
+                    "narrative_text": insight.narrative_text,
+                    "related_signal_ids": list(insight.related_signal_ids),
+                    "confidence_score": insight.confidence_score,
+                    "domains": list(insight.domains),
+                    "status": insight.status,
+                    "generated_at": insight.generated_at.isoformat(),
+                },
+                "recommendation_payload": {
+                    "id": str(recommendation.id),
+                    "insight_id": str(recommendation.insight_id),
+                    "recommendation_text": recommendation.recommendation_text,
+                    "predicted_impact": recommendation.predicted_impact,
+                    "confidence_score": recommendation.confidence_score,
+                    "status": recommendation.status,
+                    "created_at": recommendation.created_at.isoformat(),
+                },
             },
         )
 
     def update_recommendation_status(self, recommendation_id: UUID, status: str) -> RecommendationRecord:
-        if status not in RECOMMENDATION_STATUSES:
-            raise ValueError(f"unsupported recommendation status: {status}")
+        existing = self._get("recommendations", {"select": "*", "id": f"eq.{recommendation_id}"})
+        if len(existing) != 1:
+            raise LookupError("recommendation was not found")
+        current_status = str(existing[0]["status"])
+        validate_recommendation_transition(current_status, status)
         rows = self._patch(
             "recommendations",
-            {"id": f"eq.{recommendation_id}"},
+            {"id": f"eq.{recommendation_id}", "status": f"eq.{current_status}"},
             {"status": status},
         )
         if len(rows) != 1:
-            raise LookupError("recommendation was not found")
+            raise ValueError("recommendation status changed concurrently; retry the transition")
         outcome = self._get("decision_outcomes", {"select": "*", "recommendation_id": f"eq.{recommendation_id}"})
         return _recommendation_from_row(rows[0], outcome[0] if outcome else None)
 
@@ -128,6 +135,18 @@ class SupabaseInsightStore:
             response.raise_for_status()
         except httpx.HTTPError as error:
             raise RuntimeError(f"Supabase {table} write failed: {error}") from error
+
+    def _rpc(self, function: str, payload: dict[str, object]) -> None:
+        response = httpx.post(
+            f"{self._base_url}/rpc/{function}",
+            headers={**self._headers, "Prefer": "return=minimal"},
+            json=payload,
+            timeout=8.0,
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise RuntimeError(f"Supabase {function} RPC failed: {error}") from error
 
     def _patch(self, table: str, params: dict[str, object], payload: dict[str, object]) -> list[dict[str, Any]]:
         response = httpx.patch(

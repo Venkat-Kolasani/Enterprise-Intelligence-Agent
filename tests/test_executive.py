@@ -63,7 +63,7 @@ def test_briefing_and_chat_only_return_stored_evidence() -> None:
     insight_store = _insight_store(str(primary.id))
     executive_store = InMemoryExecutiveStore()
 
-    briefing = BriefingService(insight_store, executive_store).generate()
+    briefing = BriefingService(insight_store, executive_store, repository).generate()
     chat = GroundedChatService(insight_store, repository).answer("Why is CAC rising?")
     follow_up = GroundedChatService(insight_store, repository).answer(
         "What action is proposed?", prior_insight_ids=chat.insight_ids
@@ -77,7 +77,8 @@ def test_briefing_and_chat_only_return_stored_evidence() -> None:
 
     assert briefing is not None
     assert str(primary.id) in briefing.summary_text
-    assert BriefingService(insight_store, executive_store).generate() is None
+    assert BriefingService(insight_store, executive_store, repository).generate() is None
+    assert BriefingService(insight_store, InMemoryExecutiveStore(), InMemorySignalRepository([])).generate() is None
     assert chat.result == "answer"
     assert chat.signal_ids == (str(primary.id),)
     assert chat.insight_ids == (str(insight_store.list_insights()[0].id),)

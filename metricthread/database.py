@@ -17,6 +17,7 @@ from metricthread.generator import GeneratedDataset, generate_dataset
 
 MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "001_foundation.sql"
 SIGNAL_ENGINE_MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "002_signal_engine.sql"
+PHASE6_READINESS_MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "003_phase6_readiness.sql"
 
 
 def database_url() -> str:
@@ -32,11 +33,9 @@ def _set_search_path(connection: psycopg.Connection, schema: str | None) -> None
 
 
 def _apply_migration(url: str, migration_path: Path, schema: str | None = None) -> None:
-    statements = [statement.strip() for statement in migration_path.read_text().split(";") if statement.strip()]
     with psycopg.connect(url) as connection:
         _set_search_path(connection, schema)
-        for statement in statements:
-            connection.execute(statement)
+        connection.execute(migration_path.read_text())
 
 
 def apply_foundation_migration(url: str, schema: str | None = None) -> None:
@@ -45,6 +44,10 @@ def apply_foundation_migration(url: str, schema: str | None = None) -> None:
 
 def apply_signal_engine_migration(url: str, schema: str | None = None) -> None:
     _apply_migration(url, SIGNAL_ENGINE_MIGRATION_PATH, schema)
+
+
+def apply_phase6_readiness_migration(url: str, schema: str | None = None) -> None:
+    _apply_migration(url, PHASE6_READINESS_MIGRATION_PATH, schema)
 
 
 def seed_foundation(url: str, schema: str | None = None) -> GeneratedDataset:

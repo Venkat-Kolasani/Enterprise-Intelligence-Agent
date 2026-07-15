@@ -662,6 +662,60 @@ The real Supabase-backed check first created briefing `4d9fa479-4009-4978-9990-6
 - Trade-offs accepted: New API namespaces require a deliberate proxy addition during local development.
 - Revisit trigger: Phase 6 sets the deployed frontend/backend routing and `VITE_API_BASE_URL` configuration.
 
+### Phase 6 Readiness Work — 2026-07-15
+
+Phase 6 readiness work was started after the approved Phase 5 commit and an independent audit of the completed phases. The audit confirmed the previous local test command and Vite production build, the persisted four corrected signals, the real Supabase-backed insight and scenario records, the browser's evidence/chat/refusal flow, and the documented external gaps. It also identified a material evidence-lifecycle defect: Phase 3 reconciliation deleted current-engine `correlation_signals`, while Phase 5 `scenario_forecasts` now references those signals with a restrictive foreign key. A later signal rerun could therefore fail or break the audit trail. The current migration replaces deletion with explicit active/superseded evidence state; newly accepted current rows are upserted first and older active rows are superseded, never deleted.
+
+The readiness package adds `003_phase6_readiness.sql`, a transactionally atomic Supabase RPC for an insight and its recommendation, controlled forward-only recommendation lifecycle transitions, a briefing check that excludes insights whose evidence is no longer accepted, a configurable CORS policy, `/health`, a persisted-briefing read endpoint, and a `DEMO_READ_ONLY` judge mode. Judge mode permits labelled simulation, stored evidence, grounded chat, and an ephemeral deterministic scenario, but returns 403 for mutations that would persist signal, insight, lifecycle, outcome, or briefing changes. The React application surfaces API details and disables those controls in read-only mode rather than presenting a failed action as an available one. The root README, deployment runbook, public-demo script, submission checklist, collaboration record, Dockerfile, Render Blueprint, Vercel configuration, and deployed API rehearsal script were also added.
+
+Correctness and negative-control checks were run through `./scripts/test`: **26 passed, 1 skipped**, then the Vite production build completed successfully (`28 modules transformed`). The skipped raw Postgres integration fixture is the pre-existing environment limitation where the Supabase pooler resets direct TCP connections; it is not treated as a successful direct-database test. New automated checks verify that the judge demo exposes read-only status and health, blocks persistent signal/insight/briefing calls with 403, preserves the forecast response without storing it, and returns the configured CORS origin. They also verify corrected active-only signal reads, supersession rather than destructive evidence reconciliation, an atomic insight/recommendation RPC request, stale-evidence briefing refusal, and invalid lifecycle-transition rejection. Existing groundedness tests continue to require stored cited IDs, reject causal wording, and return `no_evidence` for unsupported chat. Phase 6 changes no hot-path transport; the Phase 2 600-event result remains the relevant established stream reliability evidence.
+
+`git diff --check`, Python compilation of the rehearsal script, and JSON parsing of `vercel.json` passed. A generic `@vercel/config validate` invocation was not a valid validator for this Vite project: it stopped looking for an unrelated `router.config.ts`. Docker Desktop was not running in the local environment, so no local image build was claimed. More importantly, deployed rehearsal cannot start until the manual Supabase migration and deployment projects are configured. This is a readiness checkpoint, not Phase 6 completion: no Vercel or Render URL, public YouTube video, funded GPT-5.6 inference, `/feedback` session ID, or Devpost update has yet been claimed.
+
+#### Decision: Supersede referenced evidence instead of deleting it during re-analysis
+
+- Decision: Add `state` and `superseded_at` to correlation signals, upsert the accepted current run first, and mark stale active evidence superseded rather than deleting it.
+- Context: Phase 5 persisted scenario forecasts reference correlation signals. The prior Phase 3 delete-and-replace reconciliation was safe only before dependent records existed and would now conflict with the foreign key or erase audit history.
+- Options considered: Continue deleting and require users to remove forecasts; cascade-delete dependent audit records; retain all duplicates as active; version current evidence with active/superseded state.
+- Choice made: Keep referenced evidence, surface only active corrected current-engine evidence, and mark stale records superseded.
+- Rationale: Existing scenario and insight citations stay reproducible while the dashboard and reasoning path use only the current corrected evidence set. It directly resolves the audit finding without weakening foreign keys.
+- Trade-offs accepted: The table retains historical rows and needs eventual analysis-run lineage or retention policy for large-scale production use.
+- Revisit trigger: Multiple concurrent analysis runs or a production audit requirement needs first-class analysis-run entities, ownership, and retention management.
+
+#### Decision: Make model-generated insight persistence atomic and decision transitions one-way
+
+- Decision: Persist an insight and its recommendation through one server-side Supabase RPC and allow only `proposed → planned → implemented` lifecycle transitions.
+- Context: Separate REST writes could leave an orphan insight after a recommendation-write failure, and the earlier lifecycle endpoint allowed users to skip or reverse human-review states.
+- Options considered: Keep two independent writes and permissive status updates; retry client-side; use a server-side transaction plus explicit transition validation.
+- Choice made: A `SECURITY DEFINER` RPC callable only by the server-side `service_role`, plus server validation and conditional status update.
+- Rationale: One transactional persistence boundary prevents a partial grounded record, while the forward-only lifecycle accurately represents a human-controlled recommendation rather than an autonomous action.
+- Trade-offs accepted: The Supabase migration must be manually applied, and status changes use an extra read to provide a clear concurrency error.
+- Revisit trigger: Production authorization introduces user identity, role-based approval, or an audited workflow engine.
+
+#### Decision: Deploy a read-only judge experience with explicit frontend and API safeguards
+
+- Decision: Use a Render API with `DEMO_READ_ONLY=true`, a Vercel static frontend configured with `VITE_API_BASE_URL`, exact-origin CORS, and controls disabled in the UI as well as blocked in the API.
+- Context: Judges need a live, explorable demo, but a shared synthetic deployment must not let visitors rerun analysis, create model narratives, alter outcomes, or consume unnecessary provider credits.
+- Options considered: A fully interactive shared deployment; a static video only; a read-only service that still permits safe simulation, retrieval, chat, and ephemeral scenarios.
+- Choice made: The read-only service with a full API-side write boundary and visible UI explanation.
+- Rationale: It supports the product's central executive journey while preserving deterministic seeded evidence and preventing a public demo from altering the shared dataset.
+- Trade-offs accepted: On-demand briefing generation and lifecycle/outcome entry are shown only in an authenticated or local interactive environment; deployed scenario results are intentionally not persisted.
+- Revisit trigger: Authentication, per-judge sandboxes, or a production tenant boundary can safely authorize controlled mutations.
+
+#### Decision: Treat hosted validation and Build Week artifacts as explicit manual gates
+
+- Decision: Commit deploy configuration, a reproducible API rehearsal, runbook, demo script, and checklist now; do not claim external deployment, GPT-5.6 inference, video, feedback, or Devpost completion until verified.
+- Context: The repository can prepare for deployment, but only the user can authorize cloud projects, fund the OpenAI account, publish YouTube content, retrieve the `/feedback` ID, and authorize a Devpost draft update.
+- Options considered: Use placeholder credentials; present unverified configuration as deployed; prepare the artifacts and pause for exact manual inputs.
+- Choice made: Prepare the artifacts and pause at the documented manual gates.
+- Rationale: This preserves the challenge's evidence requirements and avoids turning the Gemini fallback or an untested deployment config into an unsupported GPT-5.6 or judge-access claim.
+- Trade-offs accepted: The Phase 6 end-to-end rehearsal and submission cannot be marked complete in this environment yet.
+- Revisit trigger: The migration, Render/Vercel origins, funded OpenAI call, public video, and feedback ID are supplied and verified.
+
+After the user applied `003_phase6_readiness.sql` in the Supabase SQL Editor with `Success. No rows returned`, the configured server-side Data API check read four active corrected signals, one persisted insight, and five persisted forecasts. A current local FastAPI server was then started with `DEMO_READ_ONLY=true` and checked through the Vite dashboard. The browser loaded with no error overlay or console errors, displayed the read-only banner, four q-corrected evidence rows, the persisted grounded insight and briefing, and disabled the mutation controls. Starting the labelled simulator emitted the first compressed synthetic day and visibly populated all nine metric cards. The hot path reported 9 processed events and 0 pending; judge mode intentionally uses an in-memory cold sink, so its completed cold counter was not presented as a durable Supabase write.
+
+The browser then returned the persisted CAC explanation with insight ID `cbf71432` and signal ID `0a3a777e`, returned the explicit no-evidence refusal for the unsupported competitor-change question, and rendered a +10%, seven-day deterministic scenario with reliability `98.1`. A direct live API safety check returned 403 for `POST /signals/run`, `POST /insights/generate`, and `POST /briefings/generate`, while a scenario returned successfully and the Supabase forecast count remained `5 -> 5`. This is a real local end-to-end judge-mode rehearsal against live Supabase and Upstash configuration; it is not yet a deployed Render/Vercel rehearsal. The next required gate is a Render service URL and Vercel frontend deployment with exact-origin CORS, followed by `scripts.phase6_rehearsal` against the deployed API.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.

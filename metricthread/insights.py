@@ -16,6 +16,11 @@ from metricthread.signals import SignalEvidence, SignalRepository
 
 FORBIDDEN_CAUSAL_LANGUAGE = ("root cause", "proves", "proof", "caused", "causes")
 RECOMMENDATION_STATUSES = frozenset({"proposed", "planned", "implemented"})
+RECOMMENDATION_TRANSITIONS = {
+    "proposed": frozenset({"planned"}),
+    "planned": frozenset({"implemented"}),
+    "implemented": frozenset(),
+}
 
 
 @dataclass(frozen=True)
@@ -247,7 +252,11 @@ class InMemoryInsightStore:
         self._recommendations[recommendation.id] = recommendation
 
     def update_recommendation_status(self, recommendation_id: UUID, status: str) -> RecommendationRecord:
-        recommendation = self._recommendations[recommendation_id]
+        try:
+            recommendation = self._recommendations[recommendation_id]
+        except KeyError as error:
+            raise LookupError("recommendation was not found") from error
+        validate_recommendation_transition(recommendation.status, status)
         updated = replace(recommendation, status=status)
         self._recommendations[recommendation_id] = updated
         return updated
@@ -262,7 +271,12 @@ class InMemoryInsightStore:
         measured_at: datetime,
         notes: str,
     ) -> RecommendationRecord:
-        recommendation = self._recommendations[recommendation_id]
+        try:
+            recommendation = self._recommendations[recommendation_id]
+        except KeyError as error:
+            raise LookupError("recommendation was not found") from error
+        if recommendation.status != "implemented":
+            raise ValueError("recommendation must be implemented before recording an outcome")
         updated = replace(
             recommendation,
             outcome={
@@ -353,6 +367,13 @@ def narrative_generator_from_environment() -> NarrativeGenerator:
             raise RuntimeError("GEMINI_API_KEY and GEMINI_MODEL are required for grounded recommendations")
         return GeminiNarrativeGenerator(api_key, model)
     raise RuntimeError("AI_PROVIDER must be 'openai' or 'gemini'")
+
+
+def validate_recommendation_transition(current_status: str, next_status: str) -> None:
+    if next_status not in RECOMMENDATION_STATUSES:
+        raise ValueError(f"unsupported recommendation status: {next_status}")
+    if next_status not in RECOMMENDATION_TRANSITIONS.get(current_status, frozenset()):
+        raise ValueError(f"recommendation cannot transition from {current_status} to {next_status}")
 
 
 def _evidence_packet(signal: SignalEvidence) -> dict[str, object]:

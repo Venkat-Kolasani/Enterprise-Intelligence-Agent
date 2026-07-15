@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from metricthread.database import (
     apply_foundation_migration,
+    apply_phase6_readiness_migration,
     apply_signal_engine_migration,
     database_url,
     foundation_counts,
@@ -28,7 +29,8 @@ def main() -> None:
         url = database_url()
         apply_foundation_migration(url)
         apply_signal_engine_migration(url)
-        print("foundation and signal-engine migrations applied")
+        apply_phase6_readiness_migration(url)
+        print("foundation, signal-engine, and Phase 6 readiness migrations applied")
         return
 
     if args.command == "signals":

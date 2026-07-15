@@ -17,6 +17,7 @@ from metricthread.executive import (
     BriefingService,
     ExecutiveStore,
     GroundedChatService,
+    InMemoryExecutiveStore,
     ScenarioForecastService,
 )
 from metricthread.executive_repository import executive_store_from_environment
@@ -27,13 +28,26 @@ from metricthread.insights import (
     NarrativeGenerator,
     narrative_generator_from_environment,
 )
-from metricthread.live_pipeline import LivePipeline, cold_store_from_environment
+from metricthread.live_pipeline import InMemoryColdStore, LivePipeline, cold_store_from_environment
 from metricthread.signal_repository import signal_repository_from_environment
 from metricthread.signals import SignalRepository
 from metricthread.streams import UpstashRedisStream
 
 
 load_dotenv()
+
+
+LOCAL_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+
+def cors_origins_from_environment() -> list[str]:
+    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+    origins = [*LOCAL_CORS_ORIGINS, *(origin.strip().rstrip("/") for origin in configured.split(","))]
+    return list(dict.fromkeys(origin for origin in origins if origin))
+
+
+def demo_read_only_from_environment() -> bool:
+    return os.environ.get("DEMO_READ_ONLY", "false").strip().lower() in {"1", "true", "yes"}
 
 
 class RecommendationStatusRequest(BaseModel):
@@ -99,13 +113,14 @@ class AgentRuntime:
                 pass
 
 
-def runtime_from_environment() -> AgentRuntime:
+def runtime_from_environment(*, demo_read_only: bool = False) -> AgentRuntime:
     rest_url = os.environ.get("UPSTASH_REDIS_REST_URL")
     rest_token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
     if not rest_url or not rest_token:
         raise RuntimeError("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required")
     stream = UpstashRedisStream(rest_url, rest_token)
-    return AgentRuntime(LivePipeline(stream, cold_store_from_environment()))
+    cold_store = InMemoryColdStore() if demo_read_only else cold_store_from_environment()
+    return AgentRuntime(LivePipeline(stream, cold_store))
 
 
 def create_app(
@@ -114,25 +129,37 @@ def create_app(
     insight_store: InsightStore | None = None,
     narrative_generator: NarrativeGenerator | None = None,
     executive_store: ExecutiveStore | None = None,
+    demo_read_only: bool | None = None,
+    cors_origins: list[str] | None = None,
 ) -> FastAPI:
+    read_only_demo = demo_read_only if demo_read_only is not None else demo_read_only_from_environment()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.runtime = runtime or runtime_from_environment()
+        app.state.runtime = runtime or runtime_from_environment(demo_read_only=read_only_demo)
         app.state.signal_repository = signal_repository
         app.state.insight_store = insight_store
         app.state.narrative_generator = narrative_generator
         app.state.executive_store = executive_store
         app.state.grounded_insight_service = None
+        app.state.demo_read_only = read_only_demo
         yield
         await app.state.runtime.stop()
 
-    app = FastAPI(title="MetricThread", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="MetricThread", version="0.3.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=cors_origins or cors_origins_from_environment(),
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
+
+    def reject_persistent_write_in_judge_demo() -> None:
+        if app.state.demo_read_only:
+            raise HTTPException(
+                status_code=403,
+                detail="The deployed judge demo is read-only; persistent actions are disabled.",
+            )
 
     @app.get("/agent/status")
     def agent_status() -> dict[str, object]:
@@ -142,7 +169,12 @@ def create_app(
             "anomaly_state": "watching",
             "signal_state": "deterministic analysis available",
             "simulation_label": "synthetic live simulation",
+            "demo_access": "read_only" if app.state.demo_read_only else "interactive",
         }
+
+    @app.get("/health")
+    def health() -> dict[str, object]:
+        return {"status": "ok", "demo_access": "read_only" if app.state.demo_read_only else "interactive"}
 
     @app.get("/metrics/live")
     def live_metrics() -> dict[str, object]:
@@ -199,6 +231,7 @@ def create_app(
 
     @app.post("/signals/run")
     async def run_signals() -> dict[str, object]:
+        reject_persistent_write_in_judge_demo()
         report = await asyncio.to_thread(repository().run_analysis)
         return {
             "simulation_label": "synthetic live simulation",
@@ -235,6 +268,7 @@ def create_app(
 
     @app.post("/insights/generate")
     async def generate_insight() -> dict[str, object]:
+        reject_persistent_write_in_judge_demo()
         generated = await asyncio.to_thread(grounded_insight_service().generate_next)
         if generated is None:
             return {
@@ -255,16 +289,20 @@ def create_app(
     def update_recommendation_status(
         recommendation_id: UUID, request: RecommendationStatusRequest
     ) -> dict[str, object]:
+        reject_persistent_write_in_judge_demo()
         try:
             recommendation = insights_store().update_recommendation_status(recommendation_id, request.status)
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         return {"recommendation": recommendation.as_public_dict()}
 
     @app.post("/recommendations/{recommendation_id}/outcomes")
     def record_recommendation_outcome(
         recommendation_id: UUID, request: OutcomeRequest
     ) -> dict[str, object]:
+        reject_persistent_write_in_judge_demo()
         try:
             recommendation = insights_store().record_outcome(
                 recommendation_id,
@@ -282,7 +320,10 @@ def create_app(
 
     @app.post("/briefings/generate")
     async def generate_briefing() -> dict[str, object]:
-        briefing = await asyncio.to_thread(BriefingService(insights_store(), executive_store_instance()).generate)
+        reject_persistent_write_in_judge_demo()
+        briefing = await asyncio.to_thread(
+            BriefingService(insights_store(), executive_store_instance(), repository()).generate
+        )
         if briefing is None:
             return {
                 "generated": False,
@@ -293,6 +334,14 @@ def create_app(
             "generated": True,
             "simulation_label": "synthetic live simulation",
             "briefing": briefing.as_public_dict(),
+        }
+
+    @app.get("/briefings/latest")
+    def latest_briefing() -> dict[str, object]:
+        briefings = executive_store_instance().list_briefings()
+        return {
+            "simulation_label": "synthetic live simulation",
+            "briefing": briefings[0].as_public_dict() if briefings else None,
         }
 
     @app.post("/chat")
@@ -309,8 +358,9 @@ def create_app(
     @app.post("/scenarios/forecast")
     async def scenario_forecast(request: ScenarioForecastRequest) -> dict[str, object]:
         try:
+            forecast_store = InMemoryExecutiveStore() if app.state.demo_read_only else executive_store_instance()
             forecast = await asyncio.to_thread(
-                ScenarioForecastService(repository(), executive_store_instance()).forecast,
+                ScenarioForecastService(repository(), forecast_store).forecast,
                 input_change_percent=request.input_change_percent,
                 horizon_days=request.horizon_days,
             )

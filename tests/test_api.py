@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from metricthread.api import AgentRuntime, create_app
+from metricthread.executive import InMemoryExecutiveStore
 from metricthread.insights import GroundedNarrative, InMemoryInsightStore
 from metricthread.live_pipeline import InMemoryColdStore, LivePipeline
 from metricthread.signals import InMemorySignalRepository, observations_from_metric_events
@@ -96,8 +97,10 @@ def test_grounded_insight_and_recommendation_lifecycle_endpoints() -> None:
         generated = client.post("/insights/generate")
         insight = generated.json()["insight"]
         recommendation_id = insight["recommendations"][0]["id"]
+        skipped = client.post(f"/recommendations/{recommendation_id}/status", json={"status": "implemented"})
         planned = client.post(f"/recommendations/{recommendation_id}/status", json={"status": "planned"})
         implemented = client.post(f"/recommendations/{recommendation_id}/status", json={"status": "implemented"})
+        backward = client.post(f"/recommendations/{recommendation_id}/status", json={"status": "planned"})
         outcome = client.post(
             f"/recommendations/{recommendation_id}/outcomes",
             json={
@@ -112,8 +115,52 @@ def test_grounded_insight_and_recommendation_lifecycle_endpoints() -> None:
 
     assert generated.status_code == 200
     assert generated.json()["generated"] is True
+    assert skipped.status_code == 409
     assert planned.json()["recommendation"]["status"] == "planned"
     assert implemented.json()["recommendation"]["status"] == "implemented"
+    assert backward.status_code == 409
     assert outcome.status_code == 200
     assert outcome.json()["recommendation"]["outcome"]["outcome_metric"] == "client_acquisition_cost"
     assert listed.json()["insights"][0]["recommendations"][0]["outcome"] is not None
+
+
+def test_read_only_judge_demo_blocks_persistence_but_keeps_forecasts_and_cors_available() -> None:
+    dataset = generate_dataset(resolve_exact_keys(foundation_source_records()))
+    repository = InMemorySignalRepository(observations_from_metric_events(dataset.events))
+    repository.run_analysis()
+    executive_store = InMemoryExecutiveStore()
+    app = create_app(
+        AgentRuntime(LivePipeline(InMemoryStream(), InMemoryColdStore(), consumer_name="judge-demo-test")),
+        repository,
+        InMemoryInsightStore(),
+        executive_store=executive_store,
+        demo_read_only=True,
+        cors_origins=["https://metricthread.example"],
+    )
+
+    with TestClient(app) as client:
+        status = client.get("/agent/status")
+        health = client.get("/health")
+        blocked_signals = client.post("/signals/run")
+        blocked_insight = client.post("/insights/generate")
+        blocked_briefing = client.post("/briefings/generate")
+        forecast = client.post(
+            "/scenarios/forecast",
+            json={"input_metric": "marketing_spend", "input_change_percent": 10, "horizon_days": 7},
+        )
+        preflight = client.options(
+            "/agent/status",
+            headers={
+                "Origin": "https://metricthread.example",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert status.json()["demo_access"] == "read_only"
+    assert health.json()["status"] == "ok"
+    assert blocked_signals.status_code == 403
+    assert blocked_insight.status_code == 403
+    assert blocked_briefing.status_code == 403
+    assert forecast.status_code == 200
+    assert executive_store.list_forecasts() == []
+    assert preflight.headers["access-control-allow-origin"] == "https://metricthread.example"

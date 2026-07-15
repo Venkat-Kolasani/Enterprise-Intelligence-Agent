@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -30,7 +30,13 @@ class SupabaseSignalRepository:
     def list_accepted(self) -> list[SignalEvidence]:
         response = httpx.get(
             f"{self._base_url}/correlation_signals",
-            params={"select": "*", "order": "confidence_score.desc"},
+            params={
+                "select": "*",
+                "test_config_version": f"eq.{TEST_CONFIG_VERSION}",
+                "state": "eq.active",
+                "adjusted_q_value": "lte.0.05",
+                "order": "confidence_score.desc",
+            },
             headers=self._headers,
             timeout=8.0,
         )
@@ -42,7 +48,6 @@ class SupabaseSignalRepository:
 
     def run_analysis(self) -> SignalAnalysisReport:
         report = DeterministicSignalEngine().analyze(self._metric_observations())
-        self._clear_prior_evidence_for_current_engine()
         if report.accepted:
             response = httpx.post(
                 f"{self._base_url}/correlation_signals",
@@ -51,26 +56,34 @@ class SupabaseSignalRepository:
                     **self._headers,
                     "Prefer": "resolution=merge-duplicates,return=minimal",
                 },
-                json=[signal.as_row() for signal in report.accepted],
+                json=[{**signal.as_row(), "state": "active", "superseded_at": None} for signal in report.accepted],
                 timeout=8.0,
             )
             try:
                 response.raise_for_status()
             except httpx.HTTPError as error:
                 raise RuntimeError(f"Supabase signal write failed: {error}") from error
+        self._archive_stale_evidence({signal.evidence_fingerprint for signal in report.accepted})
         return report
 
-    def _clear_prior_evidence_for_current_engine(self) -> None:
-        response = httpx.delete(
+    def _archive_stale_evidence(self, current_fingerprints: set[str]) -> None:
+        params: dict[str, object] = {
+            "test_config_version": f"eq.{TEST_CONFIG_VERSION}",
+            "state": "eq.active",
+        }
+        if current_fingerprints:
+            params["evidence_fingerprint"] = f"not.in.({','.join(sorted(current_fingerprints))})"
+        response = httpx.patch(
             f"{self._base_url}/correlation_signals",
-            params={"test_config_version": f"eq.{TEST_CONFIG_VERSION}"},
+            params=params,
             headers={**self._headers, "Prefer": "return=minimal"},
+            json={"state": "superseded", "superseded_at": datetime.now(timezone.utc).isoformat()},
             timeout=8.0,
         )
         try:
             response.raise_for_status()
         except httpx.HTTPError as error:
-            raise RuntimeError(f"Supabase signal reconciliation failed: {error}") from error
+            raise RuntimeError(f"Supabase signal archival failed: {error}") from error
 
     def list_metric_observations(self) -> list[MetricObservation]:
         return self._metric_observations()

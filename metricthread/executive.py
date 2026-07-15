@@ -110,9 +110,15 @@ class InMemoryExecutiveStore:
 
 
 class BriefingService:
-    def __init__(self, insight_store: InsightStore, executive_store: ExecutiveStore) -> None:
+    def __init__(
+        self,
+        insight_store: InsightStore,
+        executive_store: ExecutiveStore,
+        signal_repository: SignalRepository,
+    ) -> None:
         self._insight_store = insight_store
         self._executive_store = executive_store
+        self._signal_repository = signal_repository
 
     def generate(self) -> BriefingRecord | None:
         previously_briefed = {
@@ -120,10 +126,12 @@ class BriefingService:
             for briefing in self._executive_store.list_briefings()
             for insight_id in briefing.insight_ids
         }
+        accepted_signal_ids = {str(signal.id) for signal in self._signal_repository.list_accepted()}
         new_insights = [
             insight
             for insight in self._insight_store.list_insights()
             if str(insight.id) not in previously_briefed
+            and set(insight.related_signal_ids).issubset(accepted_signal_ids)
         ]
         if not new_insights:
             return None
