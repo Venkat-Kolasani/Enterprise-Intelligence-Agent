@@ -97,7 +97,13 @@ class AgentRuntime:
 
     async def _process_stream(self) -> None:
         while True:
-            await asyncio.to_thread(self.pipeline.process_once)
+            # The Redis consumer groups are independent.  Processing them in
+            # parallel keeps the hot dashboard path from waiting for the cold
+            # durability path while preserving each group's acknowledgements.
+            await asyncio.gather(
+                asyncio.to_thread(self.pipeline.process_hot_once),
+                asyncio.to_thread(self.pipeline.process_cold_once),
+            )
             await asyncio.sleep(1)
 
     async def stop(self) -> None:

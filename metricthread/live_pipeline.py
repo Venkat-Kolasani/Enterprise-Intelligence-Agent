@@ -191,13 +191,19 @@ class LivePipeline:
         self._last_cold_error: str | None = None
         self._hot_visibility_ms: list[float] = []
         self._cold_persistence_ms: list[float] = []
-        self._next_recovery_at = 0.0
+        self._next_recovery_at = {HOT_GROUP: 0.0, COLD_GROUP: 0.0}
         self._simulation_id: str | None = None
 
     def start(self) -> None:
         self._stream.ensure_group(HOT_GROUP)
         self._stream.ensure_group(COLD_GROUP)
         self._simulation_id = str(uuid4())
+        # A fresh run should read its new entries immediately.  Reclaiming
+        # abandoned entries remains important, but doing it first adds two
+        # synchronous remote calls to the first live batch without improving
+        # its delivery.  The regular recovery interval still bounds recovery.
+        next_recovery = time.monotonic() + RECOVERY_IDLE_MS / 1_000
+        self._next_recovery_at = {HOT_GROUP: next_recovery, COLD_GROUP: next_recovery}
         self._simulation_state = "running"
 
     def emit_next_day(self) -> int:
@@ -226,8 +232,9 @@ class LivePipeline:
 
     def _drain_group(self, group: str) -> list[StreamEntry]:
         reclaimed: list[StreamEntry] = []
-        if time.monotonic() >= self._next_recovery_at:
+        if time.monotonic() >= self._next_recovery_at[group]:
             reclaimed = self._stream.reclaim_idle(group, self._consumer_name, RECOVERY_IDLE_MS, 50)
+            self._next_recovery_at[group] = time.monotonic() + RECOVERY_IDLE_MS / 1_000
         return reclaimed + self._stream.read_new(group, self._consumer_name, 50)
 
     @staticmethod
@@ -245,7 +252,7 @@ class LivePipeline:
     def _belongs_to_current_simulation(self, entry: StreamEntry) -> bool:
         return entry.fields.get("simulation_id") == self._simulation_id
 
-    def process_once(self) -> None:
+    def process_hot_once(self) -> None:
         hot_entries = self._drain_group(HOT_GROUP)
         hot_ids: list[str] = []
         for entry in hot_entries:
@@ -258,6 +265,7 @@ class LivePipeline:
             hot_ids.append(entry.stream_id)
         self._stream.acknowledge(HOT_GROUP, hot_ids)
 
+    def process_cold_once(self) -> None:
         cold_entries = self._drain_group(COLD_GROUP)
         if not cold_entries:
             return
@@ -266,6 +274,9 @@ class LivePipeline:
             self._cold_store.persist(events)
         except (KeyError, TypeError, ValueError, RuntimeError) as error:
             self._last_cold_error = str(error)
+            # A failed durable write remains pending; retry it on the next
+            # worker pass instead of waiting for the regular stale recovery.
+            self._next_recovery_at[COLD_GROUP] = time.monotonic()
             return
         self._stream.acknowledge(COLD_GROUP, [entry.stream_id for entry in cold_entries])
         self._cold_events_persisted += len(cold_entries)
@@ -273,7 +284,11 @@ class LivePipeline:
             self._emission_latency_ms(entry) for entry in cold_entries if self._belongs_to_current_simulation(entry)
         )
         self._last_cold_error = None
-        self._next_recovery_at = time.monotonic() + RECOVERY_IDLE_MS / 1_000
+
+    def process_once(self) -> None:
+        """Process both consumer groups synchronously for deterministic callers."""
+        self.process_hot_once()
+        self.process_cold_once()
 
     def status(self) -> PipelineStatus:
         groups_ready = self._simulation_state != "idle"

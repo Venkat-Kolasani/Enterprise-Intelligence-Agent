@@ -43,6 +43,28 @@ def test_cold_path_leaves_events_recoverable_when_durable_write_fails() -> None:
     assert status.last_cold_error == "durable store unavailable"
 
 
+def test_fresh_simulation_defers_stale_recovery_until_after_first_live_batch() -> None:
+    class TrackingStream(InMemoryStream):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reclaimed_groups: list[str] = []
+
+        def reclaim_idle(self, group: str, consumer: str, minimum_idle_ms: int, count: int):  # type: ignore[no-untyped-def]
+            self.reclaimed_groups.append(group)
+            return super().reclaim_idle(group, consumer, minimum_idle_ms, count)
+
+    stream = TrackingStream()
+    pipeline = LivePipeline(stream, InMemoryColdStore(), consumer_name="test-worker")
+
+    pipeline.start()
+    pipeline.emit_next_day()
+    pipeline.process_once()
+
+    assert stream.reclaimed_groups == []
+    assert pipeline.status().hot_events_processed == 9
+    assert pipeline.status().cold_events_persisted == 9
+
+
 def test_stale_stream_recovery_does_not_distort_current_simulation_latency() -> None:
     stream = InMemoryStream()
     pipeline = LivePipeline(stream, InMemoryColdStore(), consumer_name="test-worker")
