@@ -139,7 +139,7 @@ class OpenAIResponsesNarrativeGenerator:
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": json.dumps(_evidence_packet(signal), separators=(",", ":"), sort_keys=True),
+                        "content": json.dumps(evidence_packet_for_signal(signal), separators=(",", ":"), sort_keys=True),
                     },
                 ],
                 "text": {
@@ -197,7 +197,7 @@ class GeminiNarrativeGenerator:
                         "parts": [
                             {
                                 "text": json.dumps(
-                                    _evidence_packet(signal), separators=(",", ":"), sort_keys=True
+                                    evidence_packet_for_signal(signal), separators=(",", ":"), sort_keys=True
                                 )
                             }
                         ],
@@ -376,7 +376,7 @@ def validate_recommendation_transition(current_status: str, next_status: str) ->
         raise ValueError(f"recommendation cannot transition from {current_status} to {next_status}")
 
 
-def _evidence_packet(signal: SignalEvidence) -> dict[str, object]:
+def evidence_packet_for_signal(signal: SignalEvidence) -> dict[str, object]:
     return {
         "signal_id": str(signal.id),
         "source": {"domain": signal.domain_a, "metric": signal.metric_a},

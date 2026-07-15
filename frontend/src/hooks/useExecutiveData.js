@@ -10,6 +10,7 @@ export function useExecutiveData() {
   const [briefingResult, setBriefingResult] = useState(null)
   const [chatResult, setChatResult] = useState(null)
   const [forecast, setForecast] = useState(null)
+  const [casefile, setCasefile] = useState(null)
   const [errors, setErrors] = useState({})
   const [busy, setBusy] = useState({})
 
@@ -90,6 +91,21 @@ export function useExecutiveData() {
       await refresh()
     }
   }
+
+  const loadCasefile = useCallback(async (signalId) => {
+    if (!signalId) return
+    setBusy((current) => ({ ...current, casefile: true }))
+    try {
+      const result = await getJson(`/signals/${signalId}/casefile`)
+      setCasefile(result.casefile)
+      setErrors((current) => ({ ...current, casefile: undefined }))
+    } catch (requestError) {
+      setCasefile(null)
+      setErrors((current) => ({ ...current, casefile: requestError.message }))
+    } finally {
+      setBusy((current) => ({ ...current, casefile: false }))
+    }
+  }, [])
 
   async function generateInsight() {
     const result = await run('insight', () => getJson('/insights/generate', { method: 'POST' }), 'decisions')
@@ -175,6 +191,7 @@ export function useExecutiveData() {
     briefingResult,
     chatResult,
     forecast,
+    casefile,
     errors,
     busy,
     isRunning: status?.simulation_state === 'running',
@@ -182,6 +199,7 @@ export function useExecutiveData() {
     readOnlyDemo: status?.demo_access === 'read_only',
     startSimulation,
     runSignalAnalysis,
+    loadCasefile,
     generateInsight,
     updateRecommendationStatus,
     recordOutcome,

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useExecutiveData } from '../hooks/useExecutiveData'
 import { BrandLockup } from './BrandMark'
 import { BriefingStudio } from './BriefingStudio'
 import { DecisionLedger } from './DecisionLedger'
+import { EvidenceCasefile } from './EvidenceCasefile'
 import { EvidenceLedger } from './EvidenceLedger'
 import { OverviewPanel } from './OverviewPanel'
 import { ScenarioLab } from './ScenarioLab'
@@ -10,14 +11,16 @@ import { ScenarioLab } from './ScenarioLab'
 const sections = [
   ['overview', 'Overview', '01'],
   ['evidence', 'Evidence ledger', '02'],
-  ['decisions', 'Decision record', '03'],
-  ['briefing', 'Briefing room', '04'],
-  ['scenario', 'Scenario lab', '05'],
+  ['casefile', 'Evidence casefile', '03'],
+  ['decisions', 'Decision record', '04'],
+  ['briefing', 'Briefing room', '05'],
+  ['scenario', 'Scenario lab', '06'],
 ]
 
 const viewCopy = {
   overview: ['Signal desk', 'What is currently worth a human look.'],
   evidence: ['Evidence ledger', 'Every accepted predictive relationship, inspectable.'],
+  casefile: ['Evidence casefile', 'Replay the data, test family, and model boundary behind one action.'],
   decisions: ['Decision record', 'Human-owned actions and measured outcomes.'],
   briefing: ['Briefing room', 'Ask only what stored evidence can support.'],
   scenario: ['Scenario lab', 'A bounded, deterministic marketing-spend forecast.'],
@@ -28,6 +31,7 @@ function StatusNotice({ data }) {
     data.errors.connection && ['Connection issue', data.errors.connection],
     data.coldBlocked && ['Cold path pending recovery', data.status.last_cold_error],
     data.errors.evidence && ['Evidence analysis unavailable', data.errors.evidence],
+    data.errors.casefile && ['Evidence casefile unavailable', data.errors.casefile],
     data.errors.decisions && ['Decision workflow unavailable', data.errors.decisions],
     data.errors.executive && ['Executive workflow unavailable', data.errors.executive],
   ].filter(Boolean)
@@ -43,8 +47,26 @@ function StatusNotice({ data }) {
 
 export function AppWorkspace() {
   const [activeSection, setActiveSection] = useState('overview')
+  const [selectedCasefileSignalId, setSelectedCasefileSignalId] = useState(null)
   const data = useExecutiveData()
   const [heading, description] = viewCopy[activeSection]
+  const casefileSignalId = selectedCasefileSignalId ?? data.signals[0]?.id ?? null
+
+  useEffect(() => {
+    if (
+      activeSection === 'casefile'
+      && casefileSignalId
+      && data.casefile?.signal?.id !== casefileSignalId
+      && !data.busy.casefile
+    ) {
+      data.loadCasefile(casefileSignalId)
+    }
+  }, [activeSection, casefileSignalId, data.busy.casefile, data.casefile?.signal?.id, data.loadCasefile])
+
+  function openCasefile(signalId) {
+    setSelectedCasefileSignalId(signalId)
+    setActiveSection('casefile')
+  }
 
   return (
     <div className="workspace-shell">
@@ -100,7 +122,17 @@ export function AppWorkspace() {
           )}
 
           {activeSection === 'overview' && <OverviewPanel data={data} onNavigate={setActiveSection} />}
-          {activeSection === 'evidence' && <EvidenceLedger data={data} />}
+          {activeSection === 'evidence' && <EvidenceLedger data={data} onOpenCasefile={openCasefile} />}
+          {activeSection === 'casefile' && (
+            <EvidenceCasefile
+              casefile={data.casefile}
+              error={data.errors.casefile}
+              loading={data.busy.casefile}
+              selectedSignalId={casefileSignalId}
+              signals={data.signals}
+              onSelectSignal={setSelectedCasefileSignalId}
+            />
+          )}
           {activeSection === 'decisions' && <DecisionLedger data={data} />}
           {activeSection === 'briefing' && <BriefingStudio data={data} />}
           {activeSection === 'scenario' && <ScenarioLab data={data} />}

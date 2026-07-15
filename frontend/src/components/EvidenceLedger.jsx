@@ -1,6 +1,6 @@
 import { humanizeMetric, shortId } from '../lib/api'
 
-export function EvidenceLedger({ data }) {
+export function EvidenceLedger({ data, onOpenCasefile }) {
   return (
     <section className="ledger-section">
       <div className="ledger-toolbar">
@@ -14,7 +14,7 @@ export function EvidenceLedger({ data }) {
       ) : (
         <div className="ledger-table-wrap">
           <table className="evidence-ledger">
-            <thead><tr><th scope="col">Thread</th><th scope="col">Evidence</th><th scope="col">Effect</th><th scope="col">Confidence</th><th scope="col">Model record</th></tr></thead>
+            <thead><tr><th scope="col">Thread</th><th scope="col">Evidence</th><th scope="col">Effect</th><th scope="col">Confidence</th><th scope="col">Model record</th><th scope="col"><span className="sr-only">Casefile</span></th></tr></thead>
             <tbody>
               {data.signals.map((signal) => (
                 <tr key={signal.id}>
@@ -23,6 +23,7 @@ export function EvidenceLedger({ data }) {
                   <td><b>{Number(signal.effect_size).toFixed(3)} ΔR²</b><span>{signal.sample_size} observations</span></td>
                   <td><b>{Number(signal.confidence_score).toFixed(1)} / 100</b><span>{signal.confidence_version}</span></td>
                   <td><b>{shortId(signal.id)}</b><span>{signal.test_config_version}</span></td>
+                  <td><button type="button" className="ledger-casefile-action" onClick={() => onOpenCasefile(signal.id)}>Open casefile <span aria-hidden="true">→</span></button></td>
                 </tr>
               ))}
             </tbody>

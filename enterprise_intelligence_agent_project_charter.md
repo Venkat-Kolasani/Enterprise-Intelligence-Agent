@@ -796,6 +796,52 @@ Browser verification used the local Vite build with the deployed Render API as `
 - Trade-offs accepted: The visual system intentionally avoids a broad component-library look and needs a future accessibility review with real users, including contrast and keyboard-flow testing beyond the current semantic implementation.
 - Revisit trigger: Usability testing with executives identifies navigation, terminology, or density barriers, or an accessibility audit identifies changes required for a production interface.
 
+### Phase 6 Judge-Route Correction — 2026-07-15
+
+An independent production audit found that `https://metricthread.vercel.app/` served the new Evidence Thread bundle but a direct request to `/app` returned HTTP 404. This also broke the home page's standard anchor navigation to the workspace. The root `vercel.json` already used a Vite SPA rewrite, but it paired `cleanUrls: true` with destination `/index.html`. Vercel's Vite deployment guidance requires extension-free rewrite paths when `cleanUrls` is enabled, so the destination is now `/`.
+
+Correctness checks passed: `vercel.json` parsed as valid JSON, local Vite served `/app` with HTTP 200, and `./scripts/test` returned **29 passed, 1 skipped** followed by a successful Vite production build. The existing raw-Postgres integration skip and FastAPI/Starlette TestClient deprecation warning remain unchanged. This routing-only correction does not affect the signal engine, streaming path, language-model boundary, or groundedness contract. Production `/` and `/app` verification remains required immediately after the approval-gated commit and automatic Vercel deployment.
+
+#### Decision: Preserve clean public URLs while rewriting SPA deep links to the root document
+
+- Decision: Retain `cleanUrls: true` and rewrite every non-asset SPA path to `/`, rather than `/index.html`.
+- Context: The deployed Vite SPA served its root successfully but let Vercel resolve `/app` as a missing server path before React could render the workspace.
+- Options considered: Remove clean URLs and retain `/index.html`; use an extension-free root destination; replace the SPA with filesystem-routed pages.
+- Choice made: Keep the existing Vite SPA and clean URLs, with `{ "source": "/(.*)", "destination": "/" }`.
+- Rationale: It is the documented Vercel configuration for a Vite SPA using clean URLs and restores direct judge access without adding a second routing framework or duplicating the workspace document.
+- Trade-offs accepted: All non-asset paths resolve through the SPA, so future server-owned routes require a narrower rewrite before they are added.
+- Revisit trigger: Server-side routes, authentication callbacks, or multi-page rendering introduce a path that must bypass the SPA fallback.
+
+### Phase 6 Evidence Casefile Results — 2026-07-15
+
+Evidence Casefile makes a retained signal an inspectable, read-only forensic record instead of asking a judge to trust a confidence badge. `GET /signals/{signal_id}/casefile` selects only an active persisted signal, re-runs the deterministic test family in memory over the persisted observations, and never writes an analysis row, an insight, or a recommendation. Its response exposes the raw daily source and target replays, all candidate-test totals, retained/rejected totals, the two declared negative controls and their rejection reason, ADF preparation, BIC history, F statistic, raw p value, Benjamini-Hochberg q value, effect size, sample size, input-data digest, evidence fingerprint, test/configuration versions, and the versioned 40/25/20/15 confidence components. It also returns the exact compact provider packet for that signal, persisted-insight cited-ID checks, the immutable-confidence formula check, and the server-side causal-language guard. The UI presents those records as a dedicated Evidence Casefile workspace with a selectable retained signal, actual 180-point replay charts, an evidence passport, confidence breakdown, compact packet disclosure, and an explicit causal-language refusal.
+
+The sequencing choice follows the time-series validation research for the next increment: a future Evidence Resilience record will use rolling-origin windows so that every evaluation trains only on observations available before its forecast origin, following the temporal cross-validation principle documented in [Forecasting: Principles and Practice](https://otexts.com/fpp3/tscv.html). It will compare the accepted lead-lag signal with a target-history-only baseline, require every declared negative control to remain rejected, persist a versioned result, and suppress recommendations when the stability policy fails. That work deliberately starts only after this independently demoable Casefile increment is approved and pushed.
+
+Correctness, negative-control, latency/reliability, and groundedness checks were run on the actual implementation. `./scripts/test` returned **30 passed, 1 skipped, 1 warning**; the skip remains the pre-existing direct raw-Postgres pooler fixture and the warning is the existing FastAPI/Starlette TestClient deprecation. The production Vite build passed (`39 modules transformed`, `233.53 kB` JavaScript before gzip), and `git diff --check` passed. The Casefile test verifies a non-existent ID returns 404 without invoking the analysis-persistence method, the primary source and target each replay 180 observations, the in-memory family contains 54 candidates with 4 retained and 50 rejected, both declared negative controls are rejected, the primary series use first-difference ADF preparation, the packet refers to the same signal, the confidence formula matches and cannot be changed by a model, cited IDs are known, and the causal denylist contains `caused`. During implementation, the second declared negative control was initially labelled as Partner-domain `partner_incentive_budget`; the negative-control assertion failed, inspection of the seeded data showed that metric belongs to Financial, and the declaration was corrected before the passing run.
+
+Against the local API with the real Supabase-backed persisted data, five serial Casefile reads for signal `0a3a777e-08b6-5b99-b348-cd6174608cc6` completed in **1850.4–2466.0 ms** (mean **2115.2 ms**; the five-sample maximum, reported transparently rather than as a formal percentile, was **2466.0 ms**). All five responses contained the 180/180 replays, 54 candidates, 4 retained, 50 rejected, rejected negative controls, and immutable confidence. A separate real read found one linked persisted claim, no unknown cited IDs, matching persisted confidence, identical Casefile and compact-packet signal IDs, and the required `server_side_narrative_validation_required` causal guard. The interactive browser demo loaded `/app` through the local Vite application and real local API without console warnings or errors; it opened the primary Casefile, visibly rendered the Event replay, Candidate tests, and Causal-language refusal sections, then changed to retained signal `60d2b683-f31a-523f-b2ec-69ae55649165` and showed its rejected-results record. The direct local Vite deep link `/app` also returned HTTP 200 under the corrected SPA rewrite. This is a real forensic product demo, not a claim of causal proof or a live GPT-5.6 execution.
+
+#### Decision: Make every retained signal inspectable through a read-only deterministic Casefile
+
+- Decision: Add a Casefile endpoint and workspace that reconstructs the evidence from persisted observations, reports the full test-family disposition, and keeps provider narrative separate from immutable statistical facts.
+- Context: The existing ledger made adjusted q, F, effect, confidence, and fingerprint visible, but it did not let a reviewer inspect the source series, the negative-control rejections, the preparation record, or the exact bounded evidence supplied to the model.
+- Options considered: Add more prose to the existing insight card; expose raw events directly to the provider; build a separate Casefile backed by a read-only deterministic recomputation and the existing compact evidence packet.
+- Choice made: Build the read-only deterministic Casefile and reuse the existing compact packet verbatim rather than inventing a second model-facing representation.
+- Rationale: A judge can now trace an action from replayed observations through candidate selection and multiple-testing correction to the exact cited model input, without granting the model control over confidence or causal claims.
+- Trade-offs accepted: Recomputing the current 54-candidate family takes about two seconds against the current remote database, and the Casefile reports that it matches the persisted fingerprint rather than overwriting any historical evidence record.
+- Revisit trigger: Larger production histories require cached, versioned Casefile snapshots, query-level latency telemetry, and governed access controls for source data.
+
+#### Decision: Treat negative controls and causal language as first-class Casefile evidence
+
+- Decision: Show the declared unrelated pairs and their rejection status alongside an explicit causal-language refusal, rather than presenting only accepted signals.
+- Context: A strong retained predictive relationship alone can appear like an unsupported causal conclusion, especially when an AI-written recommendation is shown beside it.
+- Options considered: Show only accepted signals; disclose rejected candidates only in documentation; expose selected negative controls and server-enforced language limits in the product.
+- Choice made: Expose both declared negative controls and the existing causal-language denylist/required-evidence policy in the Casefile.
+- Rationale: The interface demonstrates what the engine did not retain and why it cannot translate prediction into a root-cause claim, making the product's guardrails auditable instead of aspirational.
+- Trade-offs accepted: The displayed control set is intentionally small and seeded; a production experiment registry would need broader control selection, pre-registration, and monitoring for regression.
+- Revisit trigger: The planned Evidence Resilience increment persists per-window control outcomes and creates a governed stability policy for recommendation suppression.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.

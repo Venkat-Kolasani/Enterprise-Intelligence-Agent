@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from metricthread.casefile import build_signal_casefile
 from metricthread.executive import (
     BriefingService,
     ExecutiveStore,
@@ -234,6 +235,15 @@ def create_app(
             "evidence_language": "Predictive lead-lag evidence; not proof of causation.",
             "signals": [signal.as_public_dict() for signal in repository().list_accepted()],
         }
+
+    @app.get("/signals/{signal_id}/casefile")
+    async def signal_casefile(signal_id: UUID) -> dict[str, object]:
+        try:
+            return await asyncio.to_thread(build_signal_casefile, signal_id, repository(), insights_store())
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/signals/run")
     async def run_signals() -> dict[str, object]:
