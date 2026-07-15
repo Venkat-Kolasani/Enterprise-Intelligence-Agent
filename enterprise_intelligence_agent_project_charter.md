@@ -716,6 +716,18 @@ After the user applied `003_phase6_readiness.sql` in the Supabase SQL Editor wit
 
 The browser then returned the persisted CAC explanation with insight ID `cbf71432` and signal ID `0a3a777e`, returned the explicit no-evidence refusal for the unsupported competitor-change question, and rendered a +10%, seven-day deterministic scenario with reliability `98.1`. A direct live API safety check returned 403 for `POST /signals/run`, `POST /insights/generate`, and `POST /briefings/generate`, while a scenario returned successfully and the Supabase forecast count remained `5 -> 5`. This is a real local end-to-end judge-mode rehearsal against live Supabase and Upstash configuration; it is not yet a deployed Render/Vercel rehearsal. The next required gate is a Render service URL and Vercel frontend deployment with exact-origin CORS, followed by `scripts.phase6_rehearsal` against the deployed API.
 
+The first Render-hosted rehearsal reached the health, evidence, persisted-insight, grounded-chat, explicit-refusal, and ephemeral-scenario checks, but `POST /simulation/start` returned HTTP 500. The token and Stream were valid because status could read the Stream length. A direct Upstash command revealed the actual response body: HTTP 400 `BUSYGROUP Consumer Group name already exists`. This is the normal idempotent outcome for a repeat deployment, but the REST adapter had called `raise_for_status()` before parsing Upstash's JSON error body, converting it to a generic transport error that bypassed the existing idempotency handler. The adapter now parses the JSON error payload first, recognizes `BUSYGROUP`, and only then raises other non-success HTTP responses. A regression test reproduces the HTTP 400 body. The rehearsal runner itself was also corrected to test the public chat contract's `result` field (`answer` or `no_evidence`) rather than a nonexistent `status` field. The current local command returned **27 passed, 1 skipped**, the Vite production build passed, and the real Upstash group preflight succeeded. The patched committed deployment is required before repeating the Render rehearsal.
+
+#### Decision: Treat an existing Upstash consumer group as an idempotent API result even when REST uses HTTP 400
+
+- Decision: Parse Upstash JSON error payloads before treating a non-2xx response as a transport failure, and preserve the existing `BUSYGROUP` idempotency rule.
+- Context: A restarted Render service must safely reuse its Stream consumer groups. Upstash represents the normal existing-group outcome as HTTP 400 with a machine-readable error body.
+- Options considered: Delete and recreate groups on each deploy; require an empty Stream; treat every 400 as a failed request; parse the provider error and recognize only the documented existing-group response.
+- Choice made: Parse the body first and ignore only `BUSYGROUP`; all other provider errors still surface as `StreamError`.
+- Rationale: This restores safe restart behavior without hiding authentication, quota, malformed-command, or Stream failures.
+- Trade-offs accepted: The adapter is coupled to the provider's current `BUSYGROUP` error string and needs a contract test whenever Upstash changes its REST error format.
+- Revisit trigger: A typed Upstash SDK or a provider-stable error code becomes available for the Stream path.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.

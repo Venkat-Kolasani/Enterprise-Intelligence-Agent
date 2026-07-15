@@ -81,12 +81,22 @@ class UpstashRedisStream:
     def _command(self, arguments: list[str | int]) -> Any:
         try:
             response = self._client.post("/", json=arguments)
+        except httpx.HTTPError as error:
+            raise StreamError(f"Upstash request failed: {error}") from error
+        try:
+            payload = response.json()
+        except ValueError as error:
+            try:
+                response.raise_for_status()
+            except httpx.HTTPError as request_error:
+                raise StreamError(f"Upstash request failed: {request_error}") from request_error
+            raise StreamError("Upstash returned a non-JSON response") from error
+        if "error" in payload:
+            raise StreamError(str(payload["error"]))
+        try:
             response.raise_for_status()
         except httpx.HTTPError as error:
             raise StreamError(f"Upstash request failed: {error}") from error
-        payload = response.json()
-        if "error" in payload:
-            raise StreamError(str(payload["error"]))
         return payload.get("result")
 
     def ensure_group(self, group: str) -> None:

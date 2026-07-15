@@ -49,7 +49,7 @@ def main() -> None:
             "/chat",
             json={"question": "Why is CAC rising?", "prior_insight_ids": []},
         )
-        if answer.get("status") != "grounded" or not answer.get("signal_ids"):
+        if answer.get("result") != "answer" or not answer.get("signal_ids"):
             raise AssertionError(f"CAC chat response was not grounded: {answer}")
 
         refusal = request_json(
@@ -58,7 +58,7 @@ def main() -> None:
             "/chat",
             json={"question": "What did a competitor change?", "prior_insight_ids": []},
         )
-        if refusal.get("status") != "no_evidence":
+        if refusal.get("result") != "no_evidence":
             raise AssertionError(f"unsupported chat did not refuse: {refusal}")
 
         forecast = request_json(
