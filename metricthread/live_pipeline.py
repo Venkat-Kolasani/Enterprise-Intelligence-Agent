@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import ceil
 from typing import Protocol
+from uuid import uuid4
 
 import httpx
 import psycopg
@@ -191,10 +192,12 @@ class LivePipeline:
         self._hot_visibility_ms: list[float] = []
         self._cold_persistence_ms: list[float] = []
         self._next_recovery_at = 0.0
+        self._simulation_id: str | None = None
 
     def start(self) -> None:
         self._stream.ensure_group(HOT_GROUP)
         self._stream.ensure_group(COLD_GROUP)
+        self._simulation_id = str(uuid4())
         self._simulation_state = "running"
 
     def emit_next_day(self) -> int:
@@ -216,6 +219,7 @@ class LivePipeline:
                     "event_id": str(event.id),
                     "payload": json.dumps(payload, separators=(",", ":"), sort_keys=True),
                     "emitted_at": datetime.now(timezone.utc).isoformat(),
+                    "simulation_id": self._simulation_id or "",
                 }
             )
         return len(events)
@@ -238,6 +242,9 @@ class LivePipeline:
         emitted_at = datetime.fromisoformat(entry.fields["emitted_at"])
         return (datetime.now(timezone.utc) - emitted_at).total_seconds() * 1_000
 
+    def _belongs_to_current_simulation(self, entry: StreamEntry) -> bool:
+        return entry.fields.get("simulation_id") == self._simulation_id
+
     def process_once(self) -> None:
         hot_entries = self._drain_group(HOT_GROUP)
         hot_ids: list[str] = []
@@ -246,7 +253,8 @@ class LivePipeline:
             if self._window.add(event):
                 self._hot_events_processed += 1
                 self._last_event_time = str(event["event_time"])
-                self._hot_visibility_ms.append(self._emission_latency_ms(entry))
+                if self._belongs_to_current_simulation(entry):
+                    self._hot_visibility_ms.append(self._emission_latency_ms(entry))
             hot_ids.append(entry.stream_id)
         self._stream.acknowledge(HOT_GROUP, hot_ids)
 
@@ -261,7 +269,9 @@ class LivePipeline:
             return
         self._stream.acknowledge(COLD_GROUP, [entry.stream_id for entry in cold_entries])
         self._cold_events_persisted += len(cold_entries)
-        self._cold_persistence_ms.extend(self._emission_latency_ms(entry) for entry in cold_entries)
+        self._cold_persistence_ms.extend(
+            self._emission_latency_ms(entry) for entry in cold_entries if self._belongs_to_current_simulation(entry)
+        )
         self._last_cold_error = None
         self._next_recovery_at = time.monotonic() + RECOVERY_IDLE_MS / 1_000
 

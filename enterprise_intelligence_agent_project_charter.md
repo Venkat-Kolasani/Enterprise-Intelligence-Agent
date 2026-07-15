@@ -728,6 +728,30 @@ The first Render-hosted rehearsal reached the health, evidence, persisted-insigh
 - Trade-offs accepted: The adapter is coupled to the provider's current `BUSYGROUP` error string and needs a contract test whenever Upstash changes its REST error format.
 - Revisit trigger: A typed Upstash SDK or a provider-stable error code becomes available for the Stream path.
 
+The patched Render deployment then passed `scripts.phase6_rehearsal` at `https://enterprise-intelligence-agent.onrender.com`: health, read-only status, four corrected signals, persisted insight, cited CAC answer, explicit competitor-pricing refusal, evidence-linked scenario, labelled simulation, and mutation rejection all passed. Vercel project `metricthread` was created in the `venkat-kolasanis-projects` team with the production-only public `VITE_API_BASE_URL` pointing to that Render service. The first build correctly exposed a configuration conflict: automatic detection chose the repository-root FastAPI application. Pinning `framework` to `vite` in `vercel.json` produced a successful production deployment at `https://metricthread.vercel.app`; the production alias served the static application with HTTP 200. The Render preflight from that exact origin currently returns HTTP 400 `Disallowed CORS origin`, as expected until the deployment's explicit origin allowlist is updated. No browser journey is claimed until that manual deployment setting is applied and the remote rehearsal is repeated.
+
+#### Decision: Pin the Vercel project to the Vite frontend and retain exact-origin API CORS
+
+- Decision: Declare `framework: "vite"` in `vercel.json`, expose only the public Render URL as production `VITE_API_BASE_URL`, and require Render to allow the stable production Vercel alias exactly.
+- Context: This monorepo contains both a root FastAPI service and a `frontend/` Vite application. Vercel auto-detected FastAPI and failed its first build because it could not find an entrypoint in its default locations. Separately, the API must not permit arbitrary browser origins in a public judge demo.
+- Options considered: Let framework detection select the backend; add a Vercel FastAPI entrypoint and serve the frontend elsewhere; pin Vite and configure a public API base URL; use wildcard CORS during the demo.
+- Choice made: Pin Vite, deploy its static `frontend/dist` output to Vercel, and set Render `CORS_ALLOWED_ORIGINS` to the stable `https://metricthread.vercel.app` alias with no trailing slash.
+- Rationale: The tracked configuration makes the frontend deployment reproducible, avoids accidentally deploying a second backend, and keeps the public browser-to-Render boundary explicit. The Vite environment value is intentionally public because it contains only an API origin, not a credential.
+- Trade-offs accepted: Render needs one manual environment-variable update and deploy after the Vercel alias exists. Preview URLs are not allowlisted, so they are not treated as judge-ready browser deployments.
+- Revisit trigger: A custom domain, authenticated preview environments, or a gateway/reverse-proxy topology changes the stable browser origin or CORS boundary.
+
+#### Decision: Measure the live p95 only for the current labelled simulation run
+
+- Decision: Attach a unique `simulation_id` to each emitted Stream entry and include only entries from the current runtime's simulation in hot-visibility and cold-persistence p95 values.
+- Context: The first hosted browser check showed implausible roughly 122-second p95 values even though the current simulator was producing fresh five-second batches. The Render process correctly reclaimed older pending entries after restart, but their historical `emitted_at` timestamps polluted the current-demo latency statistic.
+- Options considered: Hide latency in the public dashboard; clear the Stream and lose recoverability evidence; measure recovered entries as if they were current; retain recovery while separating its latency from the current simulation's p95.
+- Choice made: Preserve processing and acknowledgement of recovered entries, but tag new emissions with the current simulation ID and use that tag only for current-run latency samples.
+- Rationale: The status rail now communicates the latency of the action the judge just started rather than the age of previously recoverable work. Recovery remains visible through Stream processing and pending counts instead of being erased or misrepresented as current performance.
+- Trade-offs accepted: The public status does not yet present a separate recovery-latency distribution or detailed run lineage.
+- Revisit trigger: A production observability system adds named simulation/analysis runs, historical latency dashboards, and explicit recovery metrics.
+
+After Render exact-origin CORS was configured, its preflight for `https://metricthread.vercel.app` returned HTTP 200 with the matching `access-control-allow-origin` header. The deployed API rehearsal passed again. The Vercel browser check loaded without an error overlay or console errors, showed the read-only boundary, four evidence rows, nine live metrics, the persisted grounded recommendation, a cited CAC answer, and the deterministic seven-day forecast with reliability `98.1`. The latency-statistic correction added a focused stale-entry regression test; the current local command returned **28 passed, 1 skipped** and the Vite production build passed. The patched Render deployment must be used for the final hosted latency-statistic verification.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.
