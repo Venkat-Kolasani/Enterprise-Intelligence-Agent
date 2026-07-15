@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from metricthread.database import (
     apply_foundation_migration,
+    apply_evidence_resilience_migration,
     apply_phase6_readiness_migration,
     apply_signal_engine_migration,
     database_url,
@@ -17,12 +18,14 @@ from metricthread.database import (
 from metricthread.entities import foundation_source_records, resolve_exact_keys
 from metricthread.generator import lagged_pearson
 from metricthread.signal_repository import signal_repository_from_environment
+from metricthread.resilience import assess_signal_resilience
+from metricthread.resilience_repository import resilience_store_from_environment
 
 
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="MetricThread development commands")
-    parser.add_argument("command", choices=("migrate", "seed", "seed-rest", "demo", "signals"))
+    parser.add_argument("command", choices=("migrate", "seed", "seed-rest", "demo", "signals", "resilience"))
     args = parser.parse_args()
 
     if args.command == "migrate":
@@ -30,7 +33,8 @@ def main() -> None:
         apply_foundation_migration(url)
         apply_signal_engine_migration(url)
         apply_phase6_readiness_migration(url)
-        print("foundation, signal-engine, and Phase 6 readiness migrations applied")
+        apply_evidence_resilience_migration(url)
+        print("foundation, signal-engine, Phase 6 readiness, and resilience migrations applied")
         return
 
     if args.command == "signals":
@@ -43,6 +47,22 @@ def main() -> None:
             print(
                 f"{signal.metric_a} -> {signal.metric_b} "
                 f"q={signal.adjusted_q_value:.3g} confidence={signal.confidence_score:.2f}"
+            )
+        return
+
+    if args.command == "resilience":
+        repository = signal_repository_from_environment()
+        store = resilience_store_from_environment()
+        observations = repository.list_metric_observations()
+        for signal in repository.list_accepted():
+            assessment = assess_signal_resilience(signal, observations)
+            store.persist(assessment)
+            summary = assessment.result["summary"]
+            print(
+                f"{signal.metric_a} -> {signal.metric_b} "
+                f"eligible={assessment.recommendation_eligible} "
+                f"retained={summary['signal_retained_windows']}/{summary['origin_count']} "
+                f"baseline_wins={summary['baseline_wins']}/{summary['origin_count']}"
             )
         return
 

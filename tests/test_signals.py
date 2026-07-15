@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+from statsmodels.tools.sm_exceptions import InfeasibleTestError
 
 import metricthread.signals as signals_module
 from metricthread.entities import foundation_source_records, resolve_exact_keys
@@ -109,3 +110,24 @@ def test_zero_bic_order_is_rejected_instead_of_forcing_a_lag(monkeypatch) -> Non
 
     assert isinstance(outcome, RejectedCandidate)
     assert outcome.reason == "bic_selected_zero_lags"
+
+
+def test_infeasible_granger_fit_is_rejected_instead_of_crashing_a_resilience_window(monkeypatch) -> None:
+    index = pd.date_range("2026-01-01", periods=80, freq="D")
+    source = PreparedSeries("partner", "source_metric", pd.Series(np.arange(80), index=index), 0.01, 0.01, "none")
+    target = PreparedSeries("client", "target_metric", pd.Series(np.arange(80), index=index), 0.01, 0.01, "none")
+
+    class OneLagVar:
+        def select_order(self, **_: object) -> SimpleNamespace:
+            return SimpleNamespace(selected_orders={"bic": 1})
+
+    monkeypatch.setattr(signals_module, "VAR", lambda _: OneLagVar())
+
+    def infeasible_test(*_: object, **__: object):
+        raise InfeasibleTestError("perfect fit")
+
+    monkeypatch.setattr(signals_module, "grangercausalitytests", infeasible_test)
+    outcome = DeterministicSignalEngine()._test_candidate(source, target)
+
+    assert isinstance(outcome, RejectedCandidate)
+    assert outcome.reason == "granger_test_failed:InfeasibleTestError"

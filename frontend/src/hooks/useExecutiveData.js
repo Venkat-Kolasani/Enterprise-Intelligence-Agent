@@ -11,6 +11,8 @@ export function useExecutiveData() {
   const [chatResult, setChatResult] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [casefile, setCasefile] = useState(null)
+  const [resilience, setResilience] = useState(null)
+  const [resilienceSignalId, setResilienceSignalId] = useState(null)
   const [errors, setErrors] = useState({})
   const [busy, setBusy] = useState({})
 
@@ -107,6 +109,23 @@ export function useExecutiveData() {
     }
   }, [])
 
+  const loadResilience = useCallback(async (signalId) => {
+    if (!signalId) return
+    setBusy((current) => ({ ...current, resilience: true }))
+    try {
+      const result = await getJson(`/signals/${signalId}/resilience`)
+      setResilience(result.resilience)
+      setResilienceSignalId(signalId)
+      setErrors((current) => ({ ...current, resilience: undefined }))
+    } catch (requestError) {
+      setResilience(null)
+      setResilienceSignalId(signalId)
+      setErrors((current) => ({ ...current, resilience: requestError.message }))
+    } finally {
+      setBusy((current) => ({ ...current, resilience: false }))
+    }
+  }, [])
+
   async function generateInsight() {
     const result = await run('insight', () => getJson('/insights/generate', { method: 'POST' }), 'decisions')
     if (result) await refresh()
@@ -192,6 +211,8 @@ export function useExecutiveData() {
     chatResult,
     forecast,
     casefile,
+    resilience,
+    resilienceSignalId,
     errors,
     busy,
     isRunning: status?.simulation_state === 'running',
@@ -200,6 +221,7 @@ export function useExecutiveData() {
     startSimulation,
     runSignalAnalysis,
     loadCasefile,
+    loadResilience,
     generateInsight,
     updateRecommendationStatus,
     recordOutcome,

@@ -7,6 +7,7 @@ from uuid import UUID
 from metricthread.insights import FORBIDDEN_CAUSAL_LANGUAGE, InsightRecord, InsightStore, evidence_packet_for_signal
 from metricthread.signals import (
     CANDIDATE_FAMILY_VERSION,
+    DECLARED_NEGATIVE_CONTROLS,
     SIGNIFICANCE_Q_THRESHOLD,
     DeterministicSignalEngine,
     MetricObservation,
@@ -22,12 +23,6 @@ CONFIDENCE_WEIGHTS = {
     "sample_adequacy": 0.20,
     "recency": 0.15,
 }
-DECLARED_NEGATIVE_CONTROLS = (
-    ("partner", "partner_active_rate", "financial", "recognized_revenue"),
-    ("financial", "partner_incentive_budget", "client", "qualified_leads"),
-)
-
-
 def build_signal_casefile(
     signal_id: UUID,
     signal_repository: SignalRepository,

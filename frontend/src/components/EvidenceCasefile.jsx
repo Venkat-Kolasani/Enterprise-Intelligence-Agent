@@ -58,7 +58,7 @@ function PassportField({ label, value }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>
 }
 
-export function EvidenceCasefile({ casefile, error, loading, onSelectSignal, selectedSignalId, signals }) {
+export function EvidenceCasefile({ casefile, error, loading, onSelectSignal, resilience, resilienceError, resilienceLoading, selectedSignalId, signals }) {
   const isSelectedCasefile = casefile?.signal?.id === selectedSignalId
 
   return (
@@ -78,12 +78,12 @@ export function EvidenceCasefile({ casefile, error, loading, onSelectSignal, sel
       {loading && <p className="casefile-loading">Assembling event replay and test ledger…</p>}
       {error && <p className="casefile-error"><strong>Casefile unavailable.</strong> {error}</p>}
       {!loading && !error && !isSelectedCasefile && <p className="casefile-loading">Choose a retained signal to inspect its evidence.</p>}
-      {isSelectedCasefile && <CasefileRecord casefile={casefile} />}
+      {isSelectedCasefile && <CasefileRecord casefile={casefile} resilience={resilience?.signal_id === selectedSignalId ? resilience : null} resilienceError={resilienceError} resilienceLoading={resilienceLoading} />}
     </section>
   )
 }
 
-function CasefileRecord({ casefile }) {
+function CasefileRecord({ casefile, resilience, resilienceError, resilienceLoading }) {
   const { claim_audit: claimAudit, model_evidence_packet: packet, recomputation, replay, signal, test_family: testFamily } = casefile
   const sourcePreparation = signal.test_metadata.source_preparation
   const targetPreparation = signal.test_metadata.target_preparation
@@ -169,9 +169,11 @@ function CasefileRecord({ casefile }) {
         <p className="confidence-check">Formula recomputation: <b>{Number(confidence.recomputed_score).toFixed(1)} / 100</b> · {confidence.matches_deterministic_formula ? 'matches persisted signal' : 'mismatch requires review'} · model mutation: <b>blocked</b></p>
       </section>
 
+      <ResilienceRecord resilience={resilience} error={resilienceError} loading={resilienceLoading} />
+
       <section className="casefile-model-boundary" aria-labelledby="model-boundary-heading">
         <div className="casefile-section-heading">
-          <div><span className="casefile-index">06</span><h3 id="model-boundary-heading">Model boundary</h3></div>
+          <div><span className="casefile-index">07</span><h3 id="model-boundary-heading">Model boundary</h3></div>
           <p>Only this compact packet is passed to a configured reasoning provider—not the raw event history.</p>
         </div>
         <div className="model-boundary-grid">
@@ -195,6 +197,53 @@ function CasefileRecord({ casefile }) {
         </div>
       </section>
     </div>
+  )
+}
+
+function ResilienceRecord({ resilience, error, loading }) {
+  if (loading) {
+    return <section className="casefile-resilience"><p className="casefile-loading">Replaying rolling-origin validation windows…</p></section>
+  }
+
+  if (error) {
+    return <section className="casefile-resilience"><p className="casefile-error"><strong>Resilience record unavailable.</strong> {error}</p></section>
+  }
+
+  if (!resilience) {
+    return (
+      <section className="casefile-resilience" aria-labelledby="resilience-heading">
+        <div className="casefile-section-heading">
+          <div><span className="casefile-index">06</span><h3 id="resilience-heading">Evidence resilience</h3></div>
+          <p>Rolling-origin validation must be persisted before a new model narrative can be generated.</p>
+        </div>
+        <div className="resilience-empty"><strong>NO CURRENT ASSESSMENT</strong><p>Recommendation generation is blocked until <code>resilience_rolling_origin_v1</code> validates this exact evidence fingerprint.</p></div>
+      </section>
+    )
+  }
+
+  const { origins, summary } = resilience
+  return (
+    <section className="casefile-resilience" aria-labelledby="resilience-heading">
+      <div className="casefile-section-heading">
+        <div><span className="casefile-index">06</span><h3 id="resilience-heading">Evidence resilience</h3></div>
+        <p>Each origin trains only on history available before its held-out observation.</p>
+      </div>
+      <div className={resilience.recommendation_eligible ? 'resilience-verdict eligible' : 'resilience-verdict suppressed'}>
+        <div><span>{resilience.recommendation_eligible ? 'Recommendation eligible' : 'Recommendation suppressed'}</span><strong>{resilience.recommendation_eligible ? 'STABLE' : 'REVIEW'}</strong><small>{resilience.version}</small></div>
+        <p>{summary.signal_retained_windows} / {summary.origin_count} retained · {summary.baseline_wins} / {summary.origin_count} beat target-history baseline · {summary.negative_controls_rejected_windows} / {summary.negative_controls_required_windows} control windows rejected</p>
+      </div>
+      <div className="origin-validation-grid">
+        {origins.map((origin) => (
+          <article key={origin.origin}>
+            <span>Origin {origin.origin}</span>
+            <strong>{origin.signal_retained ? 'retained' : 'not retained'}</strong>
+            <p>Baseline error <b>{Number(origin.baseline_abs_error).toFixed(3)}</b><br />Signal error <b>{Number(origin.augmented_abs_error).toFixed(3)}</b></p>
+            <small>{origin.beats_target_history_baseline ? 'beats target history' : 'does not beat target history'} · controls {origin.negative_controls_rejected ? 'rejected' : 'regressed'}</small>
+          </article>
+        ))}
+      </div>
+      {summary.suppression_reasons.length > 0 && <p className="resilience-reasons">Suppression reasons: {summary.suppression_reasons.map((reason) => <code key={reason}>{reason}</code>)}</p>}
+    </section>
   )
 }
 

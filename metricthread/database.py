@@ -18,6 +18,7 @@ from metricthread.generator import GeneratedDataset, generate_dataset
 MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "001_foundation.sql"
 SIGNAL_ENGINE_MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "002_signal_engine.sql"
 PHASE6_READINESS_MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "003_phase6_readiness.sql"
+EVIDENCE_RESILIENCE_MIGRATION_PATH = Path(__file__).parents[1] / "db" / "migrations" / "004_evidence_resilience.sql"
 
 
 def database_url() -> str:
@@ -48,6 +49,10 @@ def apply_signal_engine_migration(url: str, schema: str | None = None) -> None:
 
 def apply_phase6_readiness_migration(url: str, schema: str | None = None) -> None:
     _apply_migration(url, PHASE6_READINESS_MIGRATION_PATH, schema)
+
+
+def apply_evidence_resilience_migration(url: str, schema: str | None = None) -> None:
+    _apply_migration(url, EVIDENCE_RESILIENCE_MIGRATION_PATH, schema)
 
 
 def seed_foundation(url: str, schema: str | None = None) -> GeneratedDataset:

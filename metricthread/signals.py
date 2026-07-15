@@ -14,6 +14,7 @@ from uuid import UUID, uuid5
 import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
+from statsmodels.tools.sm_exceptions import InfeasibleTestError
 from statsmodels.tsa.stattools import adfuller, grangercausalitytests
 from statsmodels.tsa.vector_ar.var_model import VAR
 
@@ -28,6 +29,10 @@ SIGNIFICANCE_Q_THRESHOLD = 0.05
 TEST_CONFIG_VERSION = "granger_bic_bh_v1"
 CONFIDENCE_VERSION = "confidence_v1"
 CANDIDATE_FAMILY_VERSION = "cross_domain_all_metrics_v1"
+DECLARED_NEGATIVE_CONTROLS = (
+    ("partner", "partner_active_rate", "financial", "recognized_revenue"),
+    ("financial", "partner_incentive_budget", "client", "qualified_leads"),
+)
 
 
 @dataclass(frozen=True)
@@ -333,7 +338,7 @@ class DeterministicSignalEngine:
             test_results, models = results[selected_lag]
             f_statistic, p_value, _, _ = test_results["ssr_ftest"]
             restricted_model, unrestricted_model, _ = models
-        except (ValueError, np.linalg.LinAlgError) as error:
+        except (ValueError, np.linalg.LinAlgError, InfeasibleTestError) as error:
             return self._reject(source, target, f"granger_test_failed:{type(error).__name__}")
 
         sample_size = int(unrestricted_model.nobs)

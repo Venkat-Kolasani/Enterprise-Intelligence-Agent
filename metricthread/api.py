@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from metricthread.casefile import build_signal_casefile
+from metricthread.resilience import ResilienceAssessment, ResilienceStore, assess_signal_resilience
+from metricthread.resilience_repository import resilience_store_from_environment
 from metricthread.executive import (
     BriefingService,
     ExecutiveStore,
@@ -136,6 +138,7 @@ def create_app(
     insight_store: InsightStore | None = None,
     narrative_generator: NarrativeGenerator | None = None,
     executive_store: ExecutiveStore | None = None,
+    resilience_store: ResilienceStore | None = None,
     demo_read_only: bool | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
@@ -148,6 +151,7 @@ def create_app(
         app.state.insight_store = insight_store
         app.state.narrative_generator = narrative_generator
         app.state.executive_store = executive_store
+        app.state.resilience_store = resilience_store
         app.state.grounded_insight_service = None
         app.state.demo_read_only = read_only_demo
         yield
@@ -217,7 +221,9 @@ def create_app(
         service = app.state.grounded_insight_service
         if service is None:
             generator = app.state.narrative_generator or narrative_generator_from_environment()
-            service = GroundedInsightService(repository(), insights_store(), generator)
+            service = GroundedInsightService(
+                repository(), insights_store(), generator, resilience_store_instance()
+            )
             app.state.grounded_insight_service = service
         return service
 
@@ -226,6 +232,13 @@ def create_app(
         if configured_store is None:
             configured_store = executive_store_from_environment()
             app.state.executive_store = configured_store
+        return configured_store
+
+    def resilience_store_instance() -> ResilienceStore:
+        configured_store = app.state.resilience_store
+        if configured_store is None:
+            configured_store = resilience_store_from_environment()
+            app.state.resilience_store = configured_store
         return configured_store
 
     @app.get("/signals")
@@ -244,6 +257,36 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.get("/signals/{signal_id}/resilience")
+    def signal_resilience(signal_id: UUID) -> dict[str, object]:
+        signal = next((signal for signal in repository().list_accepted() if signal.id == signal_id), None)
+        if signal is None:
+            raise HTTPException(status_code=404, detail="Active signal was not found")
+        assessment = resilience_store_instance().latest_for_signal(signal_id)
+        if assessment and assessment.evidence_fingerprint != signal.evidence_fingerprint:
+            assessment = None
+        return {
+            "simulation_label": "synthetic live simulation",
+            "resilience": assessment.as_public_dict() if assessment else None,
+        }
+
+    @app.post("/signals/{signal_id}/resilience/run")
+    async def run_signal_resilience(signal_id: UUID) -> dict[str, object]:
+        reject_persistent_write_in_judge_demo()
+        signal = next((signal for signal in repository().list_accepted() if signal.id == signal_id), None)
+        if signal is None:
+            raise HTTPException(status_code=404, detail="Active signal was not found")
+
+        def evaluate() -> ResilienceAssessment:
+            return assess_signal_resilience(signal, repository().list_metric_observations())
+
+        assessment = await asyncio.to_thread(evaluate)
+        await asyncio.to_thread(resilience_store_instance().persist, assessment)
+        return {
+            "simulation_label": "synthetic live simulation",
+            "resilience": assessment.as_public_dict(),
+        }
 
     @app.post("/signals/run")
     async def run_signals() -> dict[str, object]:
@@ -289,7 +332,7 @@ def create_app(
         if generated is None:
             return {
                 "generated": False,
-                "reason": "No newly accepted or materially changed signal requires a configured-model narrative.",
+                "reason": "No newly accepted signal has a current passing resilience assessment for a configured-model narrative.",
             }
         return {
             "generated": True,

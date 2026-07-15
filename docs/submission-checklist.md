@@ -5,12 +5,12 @@ This document intentionally distinguishes completed repository work from manual 
 ## Repository and product
 
 - [x] Public GitHub repository with MIT license.
-- [x] Seeded synthetic data, deterministic signal engine, evidence-linked workflow, chat refusal, and constrained scenario implementation.
+- [x] Seeded synthetic data, deterministic signal engine, Evidence Casefile, rolling-origin resilience gate, evidence-linked workflow, chat refusal, and constrained scenario implementation.
 - [x] Root test command and frontend production build.
 - [x] README with setup, sample-data semantics, architecture, evidence boundary, and deployment instructions.
 - [x] Deployment configuration for Vercel and Render with a read-only judge-demo mode.
 - [x] Under-three-minute narration script and a Codex/model collaboration record.
-- [ ] Phase 6 Supabase migration applied and verified in the deployed project.
+- [x] Phase 6 and Evidence Resilience Supabase migrations applied and versioned resilience records persisted in the current Supabase project.
 - [ ] Render API deployed and `/health` verified.
 - [ ] Vercel frontend deployed with the Render API origin and CORS verified.
 - [ ] Full deployed API rehearsal and browser journey recorded with actual results in the charter.

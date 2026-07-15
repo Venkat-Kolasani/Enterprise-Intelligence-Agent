@@ -32,6 +32,7 @@ function StatusNotice({ data }) {
     data.coldBlocked && ['Cold path pending recovery', data.status.last_cold_error],
     data.errors.evidence && ['Evidence analysis unavailable', data.errors.evidence],
     data.errors.casefile && ['Evidence casefile unavailable', data.errors.casefile],
+    data.errors.resilience && ['Evidence resilience unavailable', data.errors.resilience],
     data.errors.decisions && ['Decision workflow unavailable', data.errors.decisions],
     data.errors.executive && ['Executive workflow unavailable', data.errors.executive],
   ].filter(Boolean)
@@ -61,7 +62,15 @@ export function AppWorkspace() {
     ) {
       data.loadCasefile(casefileSignalId)
     }
-  }, [activeSection, casefileSignalId, data.busy.casefile, data.casefile?.signal?.id, data.loadCasefile])
+    if (
+      activeSection === 'casefile'
+      && casefileSignalId
+      && data.resilienceSignalId !== casefileSignalId
+      && !data.busy.resilience
+    ) {
+      data.loadResilience(casefileSignalId)
+    }
+  }, [activeSection, casefileSignalId, data.busy.casefile, data.busy.resilience, data.casefile?.signal?.id, data.resilienceSignalId, data.loadCasefile, data.loadResilience])
 
   function openCasefile(signalId) {
     setSelectedCasefileSignalId(signalId)
@@ -128,6 +137,9 @@ export function AppWorkspace() {
               casefile={data.casefile}
               error={data.errors.casefile}
               loading={data.busy.casefile}
+              resilience={data.resilienceSignalId === casefileSignalId ? data.resilience : null}
+              resilienceError={data.errors.resilience}
+              resilienceLoading={data.busy.resilience}
               selectedSignalId={casefileSignalId}
               signals={data.signals}
               onSelectSignal={setSelectedCasefileSignalId}

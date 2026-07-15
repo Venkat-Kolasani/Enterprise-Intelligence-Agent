@@ -12,6 +12,7 @@ import httpx
 from dotenv import load_dotenv
 
 from metricthread.signals import SignalEvidence, SignalRepository
+from metricthread.resilience import ResilienceStore, is_recommendation_eligible
 
 
 FORBIDDEN_CAUSAL_LANGUAGE = ("root cause", "proves", "proof", "caused", "causes")
@@ -297,10 +298,12 @@ class GroundedInsightService:
         signal_repository: SignalRepository,
         insight_store: InsightStore,
         narrative_generator: NarrativeGenerator,
+        resilience_store: ResilienceStore | None = None,
     ) -> None:
         self._signal_repository = signal_repository
         self._insight_store = insight_store
         self._narrative_generator = narrative_generator
+        self._resilience_store = resilience_store
 
     def generate_next(self) -> GeneratedInsight | None:
         existing_signal_ids = {
@@ -308,11 +311,15 @@ class GroundedInsightService:
             for insight in self._insight_store.list_insights()
             for signal_id in insight.related_signal_ids
         }
-        pending = [
-            signal
-            for signal in self._signal_repository.list_accepted()
-            if str(signal.id) not in existing_signal_ids
-        ]
+        pending = []
+        for signal in self._signal_repository.list_accepted():
+            if str(signal.id) in existing_signal_ids:
+                continue
+            if self._resilience_store is not None and not is_recommendation_eligible(
+                signal, self._resilience_store.latest_for_signal(signal.id)
+            ):
+                continue
+            pending.append(signal)
         if not pending:
             return None
 

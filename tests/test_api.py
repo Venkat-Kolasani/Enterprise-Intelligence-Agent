@@ -6,6 +6,7 @@ from metricthread.api import AgentRuntime, create_app
 from metricthread.executive import InMemoryExecutiveStore
 from metricthread.insights import GroundedNarrative, InMemoryInsightStore
 from metricthread.live_pipeline import InMemoryColdStore, LivePipeline
+from metricthread.resilience import InMemoryResilienceStore, assess_signal_resilience
 from metricthread.signals import InMemorySignalRepository, observations_from_metric_events
 from metricthread.streams import InMemoryStream
 from metricthread.entities import foundation_source_records, resolve_exact_keys
@@ -80,17 +81,20 @@ def test_grounded_insight_and_recommendation_lifecycle_endpoints() -> None:
             )
 
     dataset = generate_dataset(resolve_exact_keys(foundation_source_records()))
+    observations = observations_from_metric_events(dataset.events)
     signal = next(
-        item
-        for item in InMemorySignalRepository(observations_from_metric_events(dataset.events)).run_analysis().accepted
+        item for item in InMemorySignalRepository(observations).run_analysis().accepted
         if item.metric_a == "partner_referral_quality" and item.metric_b == "client_acquisition_cost"
     )
+    resilience_store = InMemoryResilienceStore()
+    resilience_store.persist(assess_signal_resilience(signal, observations))
     pipeline = LivePipeline(InMemoryStream(), InMemoryColdStore(), consumer_name="insight-api-test")
     app = create_app(
         AgentRuntime(pipeline, interval_seconds=60),
         SingleSignalRepository(signal),
         InMemoryInsightStore(),
         Narrator(),
+        resilience_store=resilience_store,
     )
 
     with TestClient(app) as client:
@@ -124,6 +128,32 @@ def test_grounded_insight_and_recommendation_lifecycle_endpoints() -> None:
     assert listed.json()["insights"][0]["recommendations"][0]["outcome"] is not None
 
 
+def test_resilience_endpoint_persists_a_versioned_assessment() -> None:
+    dataset = generate_dataset(resolve_exact_keys(foundation_source_records()))
+    repository = InMemorySignalRepository(observations_from_metric_events(dataset.events))
+    report = repository.run_analysis()
+    primary = next(
+        signal
+        for signal in report.accepted
+        if signal.metric_a == "partner_referral_quality" and signal.metric_b == "client_acquisition_cost"
+    )
+    app = create_app(
+        AgentRuntime(LivePipeline(InMemoryStream(), InMemoryColdStore(), consumer_name="resilience-api-test")),
+        repository,
+        resilience_store=InMemoryResilienceStore(),
+    )
+
+    with TestClient(app) as client:
+        before = client.get(f"/signals/{primary.id}/resilience")
+        run = client.post(f"/signals/{primary.id}/resilience/run")
+        after = client.get(f"/signals/{primary.id}/resilience")
+
+    assert before.json()["resilience"] is None
+    assert run.status_code == 200
+    assert run.json()["resilience"]["recommendation_eligible"] is True
+    assert after.json()["resilience"]["summary"]["origin_count"] == 4
+
+
 def test_read_only_judge_demo_blocks_persistence_but_keeps_forecasts_and_cors_available() -> None:
     dataset = generate_dataset(resolve_exact_keys(foundation_source_records()))
     repository = InMemorySignalRepository(observations_from_metric_events(dataset.events))
@@ -143,6 +173,7 @@ def test_read_only_judge_demo_blocks_persistence_but_keeps_forecasts_and_cors_av
         health = client.get("/health")
         blocked_signals = client.post("/signals/run")
         blocked_insight = client.post("/insights/generate")
+        blocked_resilience = client.post("/signals/00000000-0000-0000-0000-000000000000/resilience/run")
         blocked_briefing = client.post("/briefings/generate")
         forecast = client.post(
             "/scenarios/forecast",
@@ -160,6 +191,7 @@ def test_read_only_judge_demo_blocks_persistence_but_keeps_forecasts_and_cors_av
     assert health.json()["status"] == "ok"
     assert blocked_signals.status_code == 403
     assert blocked_insight.status_code == 403
+    assert blocked_resilience.status_code == 403
     assert blocked_briefing.status_code == 403
     assert forecast.status_code == 200
     assert executive_store.list_forecasts() == []

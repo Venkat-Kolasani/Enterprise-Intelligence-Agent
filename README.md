@@ -2,7 +2,7 @@
 
 **Grounded cross-functional intelligence for auditable business decisions.**
 
-MetricThread is an Enterprise Intelligence Agent for a VP-of-Growth workflow. It continuously simulates Client, Financial, and Partner signals; identifies statistically corrected predictive lead-lag evidence; turns only accepted evidence into an evidence-linked recommendation; and lets an executive test one constrained marketing-spend scenario.
+MetricThread is an Enterprise Intelligence Agent for a VP-of-Growth workflow. It continuously simulates Client, Financial, and Partner signals; identifies statistically corrected predictive lead-lag evidence; exposes every retained signal as an auditable Evidence Casefile; requires resilience validation before a new model narrative can become a recommendation; and lets an executive test one constrained marketing-spend scenario.
 
 Every metric, insight, and forecast in the current product is labelled **synthetic live simulation**. The project demonstrates a method for auditable decision support; it does not make claims about a real business, prove causality, or take external actions autonomously.
 
@@ -10,9 +10,11 @@ Every metric, insight, and forecast in the current product is labelled **synthet
 
 1. Start the synthetic live simulation: one compressed business day (nine events) emits every five seconds.
 2. Inspect the accepted evidence: partner referral quality is predictive of client acquisition cost in the seeded fixture after correction for the complete candidate family.
-3. Review an evidence-linked narrative, recommendation, confidence decomposition, and human-controlled decision status.
-4. Ask a grounded follow-up. Factual answers cite stored insight and signal IDs; unsupported questions explicitly return `no_evidence`.
-5. Test a deterministic marketing-spend change over one through seven days. The returned baseline, forecast interval, reliability, assumptions, and signal IDs are stored or, in judge-demo mode, calculated without a durable write.
+3. Open the Evidence Casefile: replay the source and target series, inspect every candidate/rejected result, stationarity preparation, q/F/effect/sample/fingerprint values, the compact provider packet, cited IDs, immutable confidence, and causal-language refusal.
+4. Inspect Evidence Resilience: rolling-origin windows compare the signal-assisted forecast with a target-history-only baseline, require every negative control to stay rejected, and suppress unstable signals from new model narratives.
+5. Review an evidence-linked narrative, recommendation, confidence decomposition, and human-controlled decision status.
+6. Ask a grounded follow-up. Factual answers cite stored insight and signal IDs; unsupported questions explicitly return `no_evidence`.
+7. Test a deterministic marketing-spend change over one through seven days. The returned baseline, forecast interval, reliability, assumptions, and signal IDs are stored or, in judge-demo mode, calculated without a durable write.
 
 ## Architecture
 
@@ -22,13 +24,16 @@ flowchart LR
     R --> H[Hot consumer group\nrolling dashboard window]
     R --> C[Cold consumer group\nSupabase Postgres]
     C --> E[Deterministic signal engine\nADF, BIC, Granger, BH]
-    E --> I[Evidence-linked insight\nand recommendation]
+    E --> K[Evidence Casefile\nreplay and model boundary]
+    E --> R[Rolling-origin resilience\nbaseline and control gate]
+    R --> I[Evidence-linked insight\nand recommendation]
     E --> F[Deterministic scenario forecast]
+    K --> U[React executive dashboard]
     I --> U[React executive dashboard]
     F --> U
 ```
 
-The stream uses independent hot and cold consumer groups, acknowledgements, recovery, and idempotent cold writes. The signal engine requires 60 usable daily observations, applies stationarity preparation and BIC-selected history through seven days, then retains only Benjamini–Hochberg adjusted `q <= 0.05` evidence. A score named `confidence_v1` is deterministic (significance 40%, incremental effect 25%, sample adequacy 20%, recency 15%); a model may narrate it but cannot change it.
+The stream uses independent hot and cold consumer groups, acknowledgements, recovery, and idempotent cold writes. The signal engine requires 60 usable daily observations, applies stationarity preparation and BIC-selected history through seven days, then retains only Benjamini–Hochberg adjusted `q <= 0.05` evidence. A score named `confidence_v1` is deterministic (significance 40%, incremental effect 25%, sample adequacy 20%, recency 15%); a model may narrate it but cannot change it. `resilience_rolling_origin_v1` evaluates four historical origins, requires the accepted signal in at least three, requires at least three target-history baseline wins, and requires both declared controls to remain rejected at every origin before a new recommendation is eligible.
 
 ## Evidence semantics
 
@@ -36,6 +41,8 @@ The stream uses independent hot and cold consumer groups, acknowledgements, reco
 - Evidence includes source/target metrics, p and q values, F statistic, effect size, sample size, BIC model history, a stable fingerprint, and confidence components.
 - The generator deliberately plants a partner-referral-quality to CAC relationship and two unrelated negative controls. These are test fixtures, not real-world findings.
 - Grounded narratives receive a compact accepted-evidence packet, must cite stored IDs, are checked server-side, and reject causal wording or unknown citations.
+- A Casefile recomputes the deterministic test family in memory for inspection but never overwrites persisted evidence.
+- Resilience assessments are versioned and linked to an exact evidence fingerprint. A missing, stale, or failing assessment blocks a new model-generated recommendation; it does not erase past human decision records.
 - Recommendation actions stay human-controlled: `proposed → planned → implemented`; only an implemented recommendation can receive a measured outcome.
 
 ## Local setup
@@ -55,15 +62,16 @@ Configure the variables in `.env`:
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required for the server-side durable data, evidence, and decision stores. Never place the secret key in `frontend/`.
 - `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, and `GEMINI_MODEL=gemini-3.1-flash-lite` provide the documented development fallback. `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and a funded `OPENAI_REASONING_MODEL` are required before claiming live GPT-5.6 output.
 
-The first two migrations and the canonical 1,620-row fixture are already applied to the project used during development. For a fresh Supabase project, apply the existing foundation and signal-engine migrations and seed according to the SQL/Python commands in the charter. Phase 6 additionally requires `db/migrations/003_phase6_readiness.sql` before running the current API against Supabase. If a direct Postgres connection is available, use:
+The first two migrations and the canonical 1,620-row fixture are already applied to the project used during development. For a fresh Supabase project, apply the existing foundation and signal-engine migrations and seed according to the SQL/Python commands in the charter. Phase 6 additionally requires `db/migrations/003_phase6_readiness.sql` and `db/migrations/004_evidence_resilience.sql` before running the current API against Supabase. If a direct Postgres connection is available, use:
 
 ```bash
 uv run python -m metricthread.cli migrate
 uv run python -m metricthread.cli seed
 uv run python -m metricthread.cli signals
+uv run python -m metricthread.cli resilience
 ```
 
-If direct database TCP is unavailable, open **Supabase Dashboard → SQL Editor → New query**, paste `db/migrations/003_phase6_readiness.sql`, and run it. That migration adds reversible evidence states and the atomic insight/recommendation persistence function required by the current backend.
+If direct database TCP is unavailable, open **Supabase Dashboard → SQL Editor → New query**, paste and run `db/migrations/003_phase6_readiness.sql` followed by `db/migrations/004_evidence_resilience.sql`. The latter creates versioned resilience records. Then run `uv run python -m metricthread.cli resilience` to persist the current active-signal assessments through the server-side Supabase Data API.
 
 Start the backend and frontend in separate terminals:
 
@@ -88,7 +96,7 @@ This runs the Python suite and a Vite production build. The raw Postgres integra
 
 The supplied configuration builds the FastAPI API as a Render Docker service and the Vite frontend on Vercel. Follow the detailed [deployment runbook](docs/deployment-runbook.md). In short:
 
-1. Apply the Phase 6 Supabase migration.
+1. Apply the Phase 6 and Evidence Resilience Supabase migrations, then persist assessments with `uv run python -m metricthread.cli resilience`.
 2. Deploy the API from `render.yaml` with `DEMO_READ_ONLY=true`.
 3. Deploy the frontend with `VITE_API_BASE_URL` set to the Render API origin.
 4. Set `CORS_ALLOWED_ORIGINS` on Render to the exact Vercel origin, redeploy, then run the rehearsal command.
@@ -118,6 +126,8 @@ Build Week's public requirements include a working Codex + GPT-5.6 project, setu
 | `GET /agent/status`, `GET /metrics/live` | Live-agent status and hot rolling metrics |
 | `POST /simulation/start` | Start the labelled synthetic simulator |
 | `GET /signals`, `POST /signals/run` | Accepted evidence and deterministic analysis |
+| `GET /signals/{id}/casefile` | Read-only forensic replay, test-family ledger, model packet, citations, and causal-language guard |
+| `GET /signals/{id}/resilience`, `POST /signals/{id}/resilience/run` | Versioned rolling-origin resilience record; persistent runs remain disabled in judge-demo mode |
 | `GET /insights`, `GET /insights/{id}`, `POST /insights/generate` | Grounded narratives and recommendations |
 | `POST /recommendations/{id}/status`, `POST /recommendations/{id}/outcomes` | Human-controlled decision tracking |
 | `GET /briefings/latest`, `POST /briefings/generate`, `POST /chat` | Executive briefing and structured-retrieval chat |

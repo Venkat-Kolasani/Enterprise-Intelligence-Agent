@@ -2,13 +2,18 @@
 
 This runbook creates a **read-only, synthetic judge demo**. It never asks you to put a secret in the frontend or repository.
 
-## 1. Apply the Phase 6 Supabase migration
+## 1. Apply the evidence-state and resilience migrations
 
 1. Open **Supabase Dashboard → SQL Editor → New query** for the MetricThread project.
-2. Paste the complete contents of [`../db/migrations/003_phase6_readiness.sql`](../db/migrations/003_phase6_readiness.sql) and click **Run**.
-3. Confirm the result says success.
+2. Paste and run [`../db/migrations/003_phase6_readiness.sql`](../db/migrations/003_phase6_readiness.sql), then [`../db/migrations/004_evidence_resilience.sql`](../db/migrations/004_evidence_resilience.sql).
+3. Confirm both results say success.
+4. From a terminal with the server-side Supabase variables, run:
 
-This adds reversible active/superseded evidence state and a transactionally atomic insight-and-recommendation persistence function. It unblocks the active-evidence filters used by the current API and ensures a signal re-analysis cannot delete records still referenced by persisted forecasts.
+   ```bash
+   uv run python -m metricthread.cli resilience
+   ```
+
+The first migration adds reversible active/superseded evidence state and a transactionally atomic insight-and-recommendation persistence function. The second adds fingerprinted, versioned rolling-origin resilience results. The CLI command persists the active evidence assessments so the Casefile can display them and a future interactive insight generation can enforce the recommendation gate.
 
 ## 2. Prepare funded OpenAI verification
 
@@ -92,3 +97,4 @@ The rehearsal checks health, the synthetic label, read-only safety, corrected ev
 - If the Vercel site reports an API error, verify `VITE_API_BASE_URL` was available during its build, then confirm the exact Vercel origin is in Render's `CORS_ALLOWED_ORIGINS` and redeploy Render.
 - If the judge demo returns 403 for a persistent action, that is intentional. The scenario, chat, existing evidence, and simulation remain usable.
 - If no signals or insights display, confirm the Phase 6 migration was applied and the server-side Supabase variables point at the seeded project.
+- If a Casefile says no resilience assessment, confirm `004_evidence_resilience.sql` was applied, run `uv run python -m metricthread.cli resilience`, and verify the stored evidence fingerprint is still active.
