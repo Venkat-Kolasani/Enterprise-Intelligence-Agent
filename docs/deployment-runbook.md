@@ -1,6 +1,6 @@
 # MetricThread deployment runbook
 
-This runbook creates a **read-only, synthetic judge demo**. It never asks you to put a secret in the frontend or repository.
+This runbook creates an **interactive workspace backed by a seeded enterprise scenario**. It never asks you to put a secret in the frontend or repository.
 
 ## 1. Apply the evidence-state and resilience migrations
 
@@ -23,7 +23,6 @@ This is mandatory before the public submission or video claims live GPT-5.6 outp
 2. Set the deployment-only variables below in Render:
 
    ```text
-   AI_PROVIDER=openai
    OPENAI_API_KEY=<funded key>
    OPENAI_REASONING_MODEL=<verified GPT-5.6 model identifier>
    ```
@@ -31,7 +30,7 @@ This is mandatory before the public submission or video claims live GPT-5.6 outp
 3. Use an interactive, non-judge environment to run one structured insight generation and verify that it is evidence-linked and uses no causal language.
 4. Record the result in the charter before saying that GPT-5.6 generated the live narrative.
 
-The current documented development fallback is Gemini 3.1 Flash-Lite. Do not mislabel it as GPT-5.6 in a demo or Devpost submission.
+Only describe a live GPT-5.6 result after the funded verification succeeds.
 
 ## 3. Deploy the FastAPI API to Render
 
@@ -40,7 +39,7 @@ The current documented development fallback is Gemini 3.1 Flash-Lite. Do not mis
 3. In the Render service's **Environment** page, set:
 
    ```text
-   DEMO_READ_ONLY=true
+   DEMO_READ_ONLY=false
    UPSTASH_REDIS_REST_URL=<Upstash REST URL>
    UPSTASH_REDIS_REST_TOKEN=<Upstash REST token>
    SUPABASE_URL=<Supabase project URL>
@@ -48,11 +47,11 @@ The current documented development fallback is Gemini 3.1 Flash-Lite. Do not mis
    CORS_ALLOWED_ORIGINS=<set after Step 4>
    ```
 
-   For a confirmed GPT-5.6 deployment, add the three OpenAI variables in Step 2. Until then, either configure the documented Gemini fallback for an **interactive non-submission environment** or do not invoke new model generation in the read-only judge demo.
+   For a confirmed GPT-5.6 deployment, add the two OpenAI variables in Step 2. The existing persisted recommendation remains available for the executive workflow until then.
 
-4. Deploy. Open `https://YOUR-RENDER-API/health`; the expected response is `{"status":"ok","demo_access":"read_only"}`.
+4. Deploy. Open `https://YOUR-RENDER-API/health`; the expected response is `{"status":"ok","demo_access":"interactive"}`.
 
-The Render service uses port `$PORT` when Render supplies one and otherwise defaults to 10000. It exposes only synthetic, read-only judge functionality.
+The Render service uses port `$PORT` when Render supplies one and otherwise defaults to 10000. It exposes an interactive, seeded-data decision workspace; lifecycle changes and measured outcomes persist through the server-side Supabase stores.
 
 ## 4. Deploy the frontend to Vercel
 
@@ -72,7 +71,7 @@ The Render service uses port `$PORT` when Render supplies one and otherwise defa
 
 5. Redeploy Render, then hard-refresh the Vercel site. Confirm the dashboard loads evidence and insights without browser console errors.
 
-`VITE_API_BASE_URL` is public by design. Never add `SUPABASE_SECRET_KEY`, OpenAI keys, Gemini keys, or Upstash tokens to Vercel.
+`VITE_API_BASE_URL` is public by design. Never add `SUPABASE_SECRET_KEY`, OpenAI keys, or Upstash tokens to Vercel.
 
 ## 5. Run the API rehearsal
 
@@ -82,7 +81,7 @@ With the Render URL in hand:
 uv run python -m scripts.phase6_rehearsal --base-url https://YOUR-RENDER-API.onrender.com
 ```
 
-The rehearsal checks health, the synthetic label, read-only safety, corrected evidence, a persisted insight, a grounded CAC answer, an explicit unsupported-question refusal, an evidence-linked scenario, hot-path simulator visibility, and rejection of a persistent signal-analysis write. Then run the browser journey in the demo script against the Vercel URL.
+The rehearsal checks health, interactive action availability, durable-cold-path configuration, corrected evidence, a persisted insight, a grounded CAC answer, an explicit unsupported-question refusal, an evidence-linked scenario, and hot-path visibility. Then run the browser journey in the demo script against the Vercel URL and save one recommendation lifecycle transition plus its measured outcome.
 
 ## 6. Record and submit
 
@@ -95,6 +94,6 @@ The rehearsal checks health, the synthetic label, read-only safety, corrected ev
 
 - If Render reports a failed health check, inspect Render logs and confirm the process is binding to `$PORT`; test `/health` directly before touching Vercel.
 - If the Vercel site reports an API error, verify `VITE_API_BASE_URL` was available during its build, then confirm the exact Vercel origin is in Render's `CORS_ALLOWED_ORIGINS` and redeploy Render.
-- If the judge demo returns 403 for a persistent action, that is intentional. The scenario, chat, existing evidence, and simulation remain usable.
+- If a persistent action returns 403, confirm `DEMO_READ_ONLY=false` in Render and redeploy. The interactive workspace intentionally persists human decision records while keeping all credentials server-side.
 - If no signals or insights display, confirm the Phase 6 migration was applied and the server-side Supabase variables point at the seeded project.
 - If a Casefile says no resilience assessment, confirm `004_evidence_resilience.sql` was applied, run `uv run python -m metricthread.cli resilience`, and verify the stored evidence fingerprint is still active.

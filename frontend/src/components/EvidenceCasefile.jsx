@@ -66,7 +66,7 @@ export function EvidenceCasefile({ casefile, error, loading, onSelectSignal, res
       <div className="casefile-controlbar">
         <div>
           <span className="kicker">Forensic evidence record</span>
-          <p>Read-only replay from the stored signal and event history. This view does not rerun or persist analysis.</p>
+          <p>Forensic replay from the stored signal and event history. This view does not rerun or overwrite analysis.</p>
         </div>
         <label htmlFor="casefile-signal">Retained signal
           <select id="casefile-signal" value={selectedSignalId ?? ''} onChange={(event) => onSelectSignal(event.target.value)}>
@@ -95,7 +95,7 @@ function CasefileRecord({ casefile, resilience, resilienceError, resilienceLoadi
         <div>
           <span className="kicker">Casefile {shortId(signal.id)}</span>
           <h2>{humanizeMetric(signal.source.metric)} <i>→</i> {humanizeMetric(signal.target.metric)}</h2>
-          <p>Retained as predictive lead–lag evidence in a synthetic live simulation. The BIC-selected model history is not a claimed business delay or causal mechanism.</p>
+          <p>Retained as predictive lead–lag evidence. The BIC-selected model history is not a claimed business delay or causal mechanism.</p>
         </div>
         <div className={recomputation.state === 'matches_persisted_evidence' ? 'casefile-seal verified' : 'casefile-seal'}>
           <span>Recomputed</span>

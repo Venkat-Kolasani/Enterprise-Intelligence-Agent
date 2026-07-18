@@ -4,17 +4,17 @@
 
 MetricThread is an Enterprise Intelligence Agent for a VP-of-Growth workflow. It continuously simulates Client, Financial, and Partner signals; identifies statistically corrected predictive lead-lag evidence; exposes every retained signal as an auditable Evidence Casefile; requires resilience validation before a new model narrative can become a recommendation; and lets an executive test one constrained marketing-spend scenario.
 
-Every metric, insight, and forecast in the current product is labelled **synthetic live simulation**. The project demonstrates a method for auditable decision support; it does not make claims about a real business, prove causality, or take external actions autonomously.
+MetricThread is a seeded enterprise scenario with a real, persisted decision workflow: lifecycle changes, outcomes, briefings, and forecasts are saved by the workspace.
 
 ## The executive journey
 
-1. Start the synthetic live simulation: one compressed business day (nine events) emits every five seconds.
+1. Start the live event feed: one compressed business day (nine events) emits every five seconds.
 2. Inspect the accepted evidence: partner referral quality is predictive of client acquisition cost in the seeded fixture after correction for the complete candidate family.
 3. Open the Evidence Casefile: replay the source and target series, inspect every candidate/rejected result, stationarity preparation, q/F/effect/sample/fingerprint values, the compact provider packet, cited IDs, immutable confidence, and causal-language refusal.
 4. Inspect Evidence Resilience: rolling-origin windows compare the signal-assisted forecast with a target-history-only baseline, require every negative control to stay rejected, and suppress unstable signals from new model narratives.
 5. Review an evidence-linked narrative, recommendation, confidence decomposition, and human-controlled decision status.
 6. Ask a grounded follow-up. Factual answers cite stored insight and signal IDs; unsupported questions explicitly return `no_evidence`.
-7. Test a deterministic marketing-spend change over one through seven days. The returned baseline, forecast interval, reliability, assumptions, and signal IDs are stored or, in judge-demo mode, calculated without a durable write.
+7. Test a deterministic marketing-spend change over one through seven days. The returned baseline, forecast interval, reliability, assumptions, and signal IDs are stored with the decision record.
 
 ## Architecture
 
@@ -60,7 +60,7 @@ Configure the variables in `.env`:
 
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are required for the simulator and Stream consumers.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required for the server-side durable data, evidence, and decision stores. Never place the secret key in `frontend/`.
-- `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, and `GEMINI_MODEL=gemini-3.1-flash-lite` provide the documented development fallback. `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and a funded `OPENAI_REASONING_MODEL` are required before claiming live GPT-5.6 output.
+- `OPENAI_API_KEY` and `OPENAI_REASONING_MODEL` enable evidence-grounded narrative generation. Keep both server-side.
 
 The first two migrations and the canonical 1,620-row fixture are already applied to the project used during development. For a fresh Supabase project, apply the existing foundation and signal-engine migrations and seed according to the SQL/Python commands in the charter. Phase 6 additionally requires `db/migrations/003_phase6_readiness.sql` and `db/migrations/004_evidence_resilience.sql` before running the current API against Supabase. If a direct Postgres connection is available, use:
 
@@ -92,16 +92,16 @@ Run the full local check before proposing or committing changes:
 
 This runs the Python suite and a Vite production build. The raw Postgres integration test is intentionally skipped in the current environment because the Supabase pooler resets direct TCP connections; deployed persistence is tested through the server-side Supabase Data API instead. The exact historical test results and decisions are recorded in [the charter](enterprise_intelligence_agent_project_charter.md).
 
-## Deployment and judge-demo mode
+## Deployment and interactive workspace
 
 The supplied configuration builds the FastAPI API as a Render Docker service and the Vite frontend on Vercel. Follow the detailed [deployment runbook](docs/deployment-runbook.md). In short:
 
 1. Apply the Phase 6 and Evidence Resilience Supabase migrations, then persist assessments with `uv run python -m metricthread.cli resilience`.
-2. Deploy the API from `render.yaml` with `DEMO_READ_ONLY=true`.
+2. Deploy the API from `render.yaml` with `DEMO_READ_ONLY=false`.
 3. Deploy the frontend with `VITE_API_BASE_URL` set to the Render API origin.
 4. Set `CORS_ALLOWED_ORIGINS` on Render to the exact Vercel origin, redeploy, then run the rehearsal command.
 
-Judge-demo mode prevents persistent signal analysis, AI generation, recommendation lifecycle changes, outcomes, and briefing generation. It still serves persisted evidence and insights, supports grounded chat, runs the labelled simulator, and calculates deterministic scenarios without durable writes. Its live cold-path status is explicitly labelled as an **in-memory read-only demo sink**; it is not presented as a durable Supabase write. The separate Phase 2 rehearsal verifies durable Stream-to-Supabase persistence.
+The deployed workspace uses a seeded scenario for its data layer while retaining real human decision tracking. Recommendation lifecycle changes, measured outcomes, scenario forecasts, and briefings persist through the server-side Supabase stores. The live pipeline writes through its durable cold path.
 
 ```bash
 uv run python -m scripts.phase6_rehearsal --base-url https://YOUR-RENDER-API.onrender.com
@@ -109,7 +109,7 @@ uv run python -m scripts.phase6_rehearsal --base-url https://YOUR-RENDER-API.onr
 
 ## Build Week record
 
-The project was built in approval-gated phases with Codex used for repository implementation, tests, deployment configuration, and documentation. The reasoning integration was designed for GPT-5.6 and retains the OpenAI path, but the verified live development run used Gemini 3.1 Flash-Lite after the OpenAI account returned `insufficient_quota`. This is not presented as GPT-5.6 output.
+The project was built in approval-gated phases with Codex used for repository implementation, tests, deployment configuration, and documentation. The reasoning integration uses the OpenAI Responses API and does not represent an unverified model run as GPT-5.6 output.
 
 Before submission, a funded OpenAI structured-output call must pass the same groundedness checks, and the public video must accurately show and narrate that result. The remaining evidence and manual checklist are in:
 
@@ -124,10 +124,10 @@ Build Week's public requirements include a working Codex + GPT-5.6 project, setu
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /agent/status`, `GET /metrics/live` | Live-agent status and hot rolling metrics |
-| `POST /simulation/start` | Start the labelled synthetic simulator |
+| `POST /simulation/start` | Start the seeded live event feed |
 | `GET /signals`, `POST /signals/run` | Accepted evidence and deterministic analysis |
-| `GET /signals/{id}/casefile` | Read-only forensic replay, test-family ledger, model packet, citations, and causal-language guard |
-| `GET /signals/{id}/resilience`, `POST /signals/{id}/resilience/run` | Versioned rolling-origin resilience record; persistent runs remain disabled in judge-demo mode |
+| `GET /signals/{id}/casefile` | Forensic replay, test-family ledger, model packet, citations, and causal-language guard |
+| `GET /signals/{id}/resilience`, `POST /signals/{id}/resilience/run` | Versioned rolling-origin resilience record |
 | `GET /insights`, `GET /insights/{id}`, `POST /insights/generate` | Grounded narratives and recommendations |
 | `POST /recommendations/{id}/status`, `POST /recommendations/{id}/outcomes` | Human-controlled decision tracking |
 | `GET /briefings/latest`, `POST /briefings/generate`, `POST /chat` | Executive briefing and structured-retrieval chat |

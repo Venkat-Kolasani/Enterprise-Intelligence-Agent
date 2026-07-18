@@ -7,7 +7,6 @@ import pytest
 from metricthread.entities import foundation_source_records, resolve_exact_keys
 from metricthread.generator import generate_dataset
 from metricthread.insights import (
-    GeminiNarrativeGenerator,
     GroundedInsightService,
     GroundedNarrative,
     InMemoryInsightStore,
@@ -161,58 +160,3 @@ def test_openai_generator_rejects_causal_language_even_in_schema_valid_output(mo
 
     with pytest.raises(RuntimeError, match="evidence language"):
         OpenAIResponsesNarrativeGenerator("test-key", "gpt-5.6-luna").generate(primary)
-
-
-def test_gemini_generator_uses_structured_output_and_the_same_grounding_validation(monkeypatch) -> None:
-    primary = _primary_signal()
-    captured: dict[str, object] = {}
-
-    class Response:
-        def __init__(self, payload):
-            self._payload = payload
-
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self):
-            return self._payload
-
-    def get(*_: object, **__: object) -> Response:
-        return Response({"name": "models/gemini-3.1-flash-lite"})
-
-    def post(*_: object, **kwargs: object) -> Response:
-        captured.update(kwargs)
-        return Response(
-            {
-                "candidates": [
-                    {
-                        "content": {
-                            "parts": [
-                                {
-                                    "text": json.dumps(
-                                        {
-                                            "signal_id": str(primary.id),
-                                            "title": "Quality signal requires review",
-                                            "narrative": "This evidence is consistent with a negative synthetic relationship.",
-                                            "recommendation": "Propose a human review before any action.",
-                                            "predicted_impact": "Any impact remains predictive and requires measurement.",
-                                            "evidence_signal_ids": [str(primary.id)],
-                                        }
-                                    )
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-        )
-
-    monkeypatch.setattr("metricthread.insights.httpx.get", get)
-    monkeypatch.setattr("metricthread.insights.httpx.post", post)
-    narrative = GeminiNarrativeGenerator("test-key", "gemini-3.1-flash-lite").generate(primary)
-
-    assert narrative.signal_id == str(primary.id)
-    request = captured["json"]
-    assert request["generationConfig"]["responseMimeType"] == "application/json"
-    assert request["generationConfig"]["responseJsonSchema"]["additionalProperties"] is False
-    assert request["generationConfig"]["temperature"] == 0

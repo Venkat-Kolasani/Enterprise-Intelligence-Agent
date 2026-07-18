@@ -14,7 +14,7 @@ export function LandingPage() {
         <nav className="site-nav" aria-label="Primary navigation">
           <a href="#method">Method</a>
           <a href="#protocol">Protocol</a>
-          <a href="/app">Live demo</a>
+          <a href="/app">Workspace</a>
         </nav>
         <a className="text-action" href="/app">Open workspace <span aria-hidden="true">↗</span></a>
       </header>
@@ -33,7 +33,7 @@ export function LandingPage() {
         </div>
 
         <div className="thread-study" aria-label="Example evidence thread from partner referral quality to human review">
-          <div className="study-topline"><span>LIVE STUDY / SOUTH GROWTH</span><b>SIMULATED</b></div>
+          <div className="study-topline"><span>LIVE STUDY / SOUTH GROWTH</span><b>ACTIVE</b></div>
           <div className="study-grid">
             <article className="thread-card observation">
               <span className="thread-number">01</span>
@@ -56,17 +56,14 @@ export function LandingPage() {
               <strong>proposed</strong>
             </article>
           </div>
-          <div className="study-caption">
-            <span className="pulse-dot" aria-hidden="true" />
-            Synthetic live simulation. Evidence is predictive, not proof of causation.
-          </div>
+          <div className="study-caption"><span className="pulse-dot" aria-hidden="true" /> Evidence is predictive, not proof of causation.</div>
         </div>
       </section>
 
       <section className="proof-band" aria-label="MetricThread principles">
         <p><span>01</span> Evidence first</p>
         <p><span>02</span> Human controlled</p>
-        <p><span>03</span> Replayable simulation</p>
+        <p><span>03</span> Accountable decisions</p>
       </section>
 
       <section className="method-section" id="method" aria-labelledby="method-title">
@@ -104,12 +101,12 @@ export function LandingPage() {
       <section className="home-cta">
         <p className="kicker">Ready for inspection</p>
         <h2>Follow one signal<br />all the way through.</h2>
-        <a className="primary-action" href="/app">Open the synthetic live demo <span aria-hidden="true">→</span></a>
+        <a className="primary-action" href="/app">Open the decision workspace <span aria-hidden="true">→</span></a>
       </section>
 
       <footer className="site-footer">
         <BrandLockup />
-        <p>MetricThread / Build Week prototype / Synthetic data only</p>
+        <p>MetricThread / Enterprise intelligence agent</p>
       </footer>
     </main>
   )

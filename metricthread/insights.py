@@ -176,65 +176,6 @@ class OpenAIResponsesNarrativeGenerator:
             raise RuntimeError(f"OpenAI model preflight failed for {self._model}: {error}") from error
 
 
-class GeminiNarrativeGenerator:
-    """Calls Gemini with structured output while preserving the same evidence boundary."""
-
-    def __init__(self, api_key: str, model: str) -> None:
-        self._api_key = api_key
-        self._model = model
-        self._headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-
-    def generate(self, signal: SignalEvidence) -> GroundedNarrative:
-        self._validate_model()
-        signal_id = str(signal.id)
-        response = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent",
-            headers=self._headers,
-            json={
-                "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": json.dumps(
-                                    evidence_packet_for_signal(signal), separators=(",", ":"), sort_keys=True
-                                )
-                            }
-                        ],
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": 0,
-                    "maxOutputTokens": 450,
-                    "responseMimeType": "application/json",
-                    "responseJsonSchema": _narrative_schema(signal_id),
-                },
-            },
-            timeout=45.0,
-        )
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as error:
-            raise RuntimeError(f"Gemini grounded recommendation request failed: {_http_error_detail(error)}") from error
-        except httpx.HTTPError as error:
-            raise RuntimeError(f"Gemini grounded recommendation request failed: {error}") from error
-        return _validate_narrative(_gemini_response_text(response.json()), signal_id)
-
-    def _validate_model(self) -> None:
-        response = httpx.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}",
-            headers={"x-goog-api-key": self._api_key},
-            timeout=10.0,
-        )
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as error:
-            raise RuntimeError(f"Gemini model preflight failed for {self._model}: {_http_error_detail(error)}") from error
-        except httpx.HTTPError as error:
-            raise RuntimeError(f"Gemini model preflight failed for {self._model}: {error}") from error
-
-
 class InMemoryInsightStore:
     """Small deterministic store for API tests and local demonstrations."""
 
@@ -360,20 +301,11 @@ class GroundedInsightService:
 
 def narrative_generator_from_environment() -> NarrativeGenerator:
     load_dotenv()
-    provider = os.environ.get("AI_PROVIDER", "openai").strip().lower()
-    if provider == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-        model = os.environ.get("OPENAI_REASONING_MODEL")
-        if not api_key or not model:
-            raise RuntimeError("OPENAI_API_KEY and OPENAI_REASONING_MODEL are required for grounded recommendations")
-        return OpenAIResponsesNarrativeGenerator(api_key, model)
-    if provider == "gemini":
-        api_key = os.environ.get("GEMINI_API_KEY")
-        model = os.environ.get("GEMINI_MODEL")
-        if not api_key or not model:
-            raise RuntimeError("GEMINI_API_KEY and GEMINI_MODEL are required for grounded recommendations")
-        return GeminiNarrativeGenerator(api_key, model)
-    raise RuntimeError("AI_PROVIDER must be 'openai' or 'gemini'")
+    api_key = os.environ.get("OPENAI_API_KEY")
+    model = os.environ.get("OPENAI_REASONING_MODEL")
+    if not api_key or not model:
+        raise RuntimeError("OPENAI_API_KEY and OPENAI_REASONING_MODEL are required for grounded recommendations")
+    return OpenAIResponsesNarrativeGenerator(api_key, model)
 
 
 def validate_recommendation_transition(current_status: str, next_status: str) -> None:
@@ -445,25 +377,6 @@ def _response_output_text(response: dict[str, object]) -> str:
                 if isinstance(part, dict) and part.get("type") == "output_text" and isinstance(part.get("text"), str):
                     return part["text"]
     raise RuntimeError("OpenAI response did not contain structured output text")
-
-
-def _gemini_response_text(response: dict[str, object]) -> str:
-    candidates = response.get("candidates")
-    if not isinstance(candidates, list):
-        raise RuntimeError("Gemini response did not contain a candidate")
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        content = candidate.get("content")
-        if not isinstance(content, dict):
-            continue
-        parts = content.get("parts")
-        if not isinstance(parts, list):
-            continue
-        for part in parts:
-            if isinstance(part, dict) and isinstance(part.get("text"), str) and part["text"]:
-                return part["text"]
-    raise RuntimeError("Gemini response did not contain structured output text")
 
 
 def _http_error_detail(error: httpx.HTTPStatusError) -> str:

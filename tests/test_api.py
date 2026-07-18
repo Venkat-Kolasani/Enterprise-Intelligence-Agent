@@ -24,6 +24,8 @@ def test_agent_status_and_simulation_endpoints_expose_live_pipeline_state() -> N
 
     assert before_start.status_code == 200
     assert before_start.json()["simulation_state"] == "idle"
+    assert before_start.json()["demo_access"] == "interactive"
+    assert before_start.json()["cold_path_mode"] == "durable_store"
     assert started.status_code == 200
     assert started.json()["started"] is True
     assert started.json()["simulation_label"] == "synthetic live simulation"

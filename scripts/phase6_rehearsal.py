@@ -24,16 +24,16 @@ def main() -> None:
 
     with httpx.Client(base_url=base_url, timeout=15.0) as client:
         health = request_json(client, "GET", "/health")
-        if health != {"status": "ok", "demo_access": "read_only"}:
+        if health != {"status": "ok", "demo_access": "interactive"}:
             raise AssertionError(f"unexpected health response: {health}")
 
         status = request_json(client, "GET", "/agent/status")
         if status.get("simulation_label") != "synthetic live simulation":
             raise AssertionError("agent status is missing the synthetic-data label")
-        if status.get("demo_access") != "read_only":
-            raise AssertionError("deployed judge demo is not read-only")
-        if status.get("cold_path_mode") != "ephemeral_demo_sink":
-            raise AssertionError("judge demo does not disclose its in-memory cold-path sink")
+        if status.get("demo_access") != "interactive":
+            raise AssertionError("deployed workspace does not permit decision actions")
+        if status.get("cold_path_mode") != "durable_store":
+            raise AssertionError("interactive workspace is not configured for durable cold-path writes")
 
         signals = request_json(client, "GET", "/signals").get("signals", [])
         if not signals:
@@ -86,11 +86,7 @@ def main() -> None:
         else:
             raise AssertionError("the live simulation did not reach the hot path within 15 seconds")
 
-        blocked = client.post("/signals/run")
-        if blocked.status_code != 403:
-            raise AssertionError(f"read-only signal analysis was not blocked: {blocked.status_code}")
-
-    print("Phase 6 deployed rehearsal passed: read-only, evidence-matched, grounded, and live paths verified.")
+    print("Phase 6 deployed rehearsal passed: interactive, evidence-matched, grounded, and live paths verified.")
 
 
 if __name__ == "__main__":

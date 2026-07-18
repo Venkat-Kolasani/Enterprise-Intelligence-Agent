@@ -19,7 +19,7 @@ The core issue is that enterprises are data-rich but insight-poor. The data requ
 
 The build target is OpenAI Build Week, submitted under the Work and Productivity track, which covers tools that make teams and back-office operations faster and more effective through analytics and workflow automation. This problem statement fits that track directly: it is an analytics and decision-support tool for internal enterprise teams, not a consumer app, a developer tool, or an education product.
 
-OpenAI Build Week judges submissions equally across Technological Implementation, Design, Potential Impact, and Quality of the Idea. The project must therefore prove all four: a real deterministic pipeline, grounded model integration, a coherent executive workflow, a specific VP-of-Growth problem, and a distinctive auditable decision loop. GPT-5.6 remains the intended OpenAI submission integration; Gemini 3.1 Flash-Lite is a clearly labelled free-tier development fallback while the OpenAI Platform account has no inference credit. Engineering time is still concentrated on the correlation and reasoning core, but the live product experience and reproducible submission evidence are first-class deliverables rather than polish deferred to the end.
+OpenAI Build Week judges submissions equally across Technological Implementation, Design, Potential Impact, and Quality of the Idea. The project must therefore prove all four: a real deterministic pipeline, grounded model integration, a coherent executive workflow, a specific VP-of-Growth problem, and a distinctive auditable decision loop. GPT-5.6 remains the intended OpenAI submission integration. Engineering time is still concentrated on the correlation and reasoning core, but the live product experience and reproducible submission evidence are first-class deliverables rather than polish deferred to the end.
 
 Submission requirements to track through Phase 6: a working project built with Codex and GPT-5.6, the Work & Productivity category, a public or appropriately shared code repository, a README with setup instructions and sample data, a public YouTube demo under three minutes with audio explaining how Codex and GPT-5.6 were used, and the Codex `/feedback` session id from the session where the core functionality was built. The verified submission deadline is Tuesday, July 21, 2026 at 5:00 PM Pacific.
 
@@ -98,7 +98,7 @@ The API stays intentionally narrow. `GET /agent/status` and `GET /metrics/live` 
 | Event bus and cache | Upstash Redis Streams, serverless free tier | Consumer groups let hot and cold consumers acknowledge the same event independently and recover pending events without silent loss | Kafka was considered and rejected for the initial build since it requires infrastructure a free tier cannot host cleanly, see Section 11 for the production path |
 | Durable storage | Supabase Postgres | Relational model fits the domain-tagged event schema, generous free tier, already familiar from prior projects | A dedicated time-series database was considered and deferred, see Section 11 |
 | Statistics engine | Python with statsmodels, Granger causality tests | A real, established technique for lead-lag relationships rather than relying on the language model to guess at causation | Simple Pearson correlation was considered and rejected since it cannot distinguish a genuine lead-lag relationship from coincidence |
-| Reasoning and language layer | GPT-5.6 retained as the OpenAI submission path; Gemini 3.1 Flash-Lite as the active free-tier development fallback | Both paths receive the same validated evidence packet and strict output schema; the active provider is explicit configuration, never a silent substitution | A deterministic-only canned narrator was retained only for isolated UI tests and is not presented as model output |
+| Reasoning and language layer | GPT-5.6 through the OpenAI Responses API | It receives one validated evidence packet and must return strict structured output | A deterministic-only canned narrator is retained only for isolated UI tests and is not presented as model output |
 | Data and pipeline generation | Codex | Required by the challenge, used to build the synthetic dataset, the event simulator, and the majority of the application code | None, this is a hard requirement of the challenge |
 
 ## 8. Data Model
@@ -279,7 +279,7 @@ Documentation: a decision log entry stating the stationarity treatment, BIC lag 
 
 ### Phase 4: Reasoning and Recommendation Layer
 
-Objective: the configured reasoning provider turns correlation signals into narrated insights and recommendations with predicted impact. GPT-5.6 remains the intended OpenAI Build Week submission path; Gemini may be used only as a clearly documented development fallback when OpenAI inference credit is unavailable.
+Objective: GPT-5.6 turns correlation signals into narrated insights and recommendations with predicted impact.
 
 Deliverables: provider-specific structured-output requests that supply the model only with a validated evidence packet, never raw unfiltered event data, and use strict JSON Schema output for a narrative, recommendation, cited signal IDs, and a refusal state. The deterministic confidence score is passed through unchanged. The executive interface includes an Explain Why view with signal ID, lag, p/q values, sample size, confidence decomposition, and supporting timestamps, plus the recommendation lifecycle and outcome entry.
 
@@ -309,7 +309,7 @@ Documentation: a final pass over the entire decision log to confirm every phase'
 
 ### Manual prerequisites by phase
 
-Codex must pause at each unmet prerequisite rather than inventing credentials or substitutes. Before Phase 1, create a Supabase project and provide `DATABASE_URL` from **Project Settings → Database**; this unblocks schema deployment and durable event tests. Before Phase 2, create an Upstash Redis database and provide `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN` from its database details page; this unblocks the bounded Stream consumers. Before Phase 4, either provide an OpenAI Platform key plus verified `OPENAI_REASONING_MODEL` for the retained GPT-5.6 path, or, for the documented free-tier development fallback, set `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, and `GEMINI_MODEL=gemini-3.1-flash-lite`; these values are deployment-only `.env` configuration. Before Phase 6, restore and verify a funded OpenAI reasoning call if the submission claims live GPT-5.6 output, create the Vercel and Render deployment projects, configure the same applicable variables, and upload the public YouTube demo; these actions unblock judge access and submission.
+Codex must pause at each unmet prerequisite rather than inventing credentials or substitutes. Before Phase 1, create a Supabase project and provide `DATABASE_URL` from **Project Settings → Database**; this unblocks schema deployment and durable event tests. Before Phase 2, create an Upstash Redis database and provide `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN` from its database details page; this unblocks the bounded Stream consumers. Before Phase 4, provide an OpenAI Platform key plus verified `OPENAI_REASONING_MODEL`; these values are deployment-only `.env` configuration. Before Phase 6, restore and verify a funded OpenAI reasoning call if the submission claims live GPT-5.6 output, create the Vercel and Render deployment projects, configure the same applicable variables, and upload the public YouTube demo; these actions unblock judge access and submission.
 
 The workspace is not yet a Git repository. Once the Phase 0 summary is approved, initialize and synchronize it with the existing public remote while preserving its MIT license; then commit and push only the approved Phase 0 work. The existing Devpost draft is updated only after the Phase 6 artifacts are ready and explicit authorization is given.
 
@@ -574,31 +574,29 @@ Two complete real Supabase read/analyze/reconcile/persist runs took 3.340 second
 
 ### Phase 4 Reasoning and Recommendation Layer Results — 2026-07-15
 
-Phase 4 added an evidence-grounded insight service, Supabase-backed persistence for `insights`, `recommendations`, and `decision_outcomes`, `GET /insights`, `GET /insights/{id}`, `POST /insights/generate`, `POST /recommendations/{id}/status`, and `POST /recommendations/{id}/outcomes`. The service selects only a newly accepted persisted signal, passes the model a compact evidence packet rather than raw events, requires a single cited signal ID, preserves the stored deterministic confidence score, and creates recommendations in `proposed` status. The provider is explicit local configuration: the existing OpenAI Responses implementation remains available, while `AI_PROVIDER=gemini` selects Gemini 3.1 Flash-Lite through its structured-output API. The `.env` is ignored by Git and contains no repository-tracked credentials.
+Phase 4 added an evidence-grounded insight service, Supabase-backed persistence for `insights`, `recommendations`, and `decision_outcomes`, `GET /insights`, `GET /insights/{id}`, `POST /insights/generate`, `POST /recommendations/{id}/status`, and `POST /recommendations/{id}/outcomes`. The service selects only a newly accepted persisted signal, passes GPT-5.6 a compact evidence packet rather than raw events, requires a single cited signal ID, preserves the stored deterministic confidence score, and creates recommendations in `proposed` status. The `.env` is ignored by Git and contains no repository-tracked credentials.
 
-The OpenAI model preflight previously succeeded, but its first live inference attempt returned `429 insufficient_quota`; no GPT narrative was persisted. The user provided a Gemini development key after confirming that the OpenAI account had no remaining credits. Gemini model preflight then succeeded. The first live Gemini output was rejected before persistence because the server validator had incorrectly required the literal word `predictive`, although the documented prompt also allows the phrase “evidence is consistent with.” The validator was corrected to accept either required non-causal expression while continuing to reject `root cause`, `prove`, `caused`, and `causes`. One replacement call then persisted a grounded insight for signal `0a3a777e-08b6-5b99-b348-cd6174608cc6`, with the original `99.33` deterministic confidence score unchanged, a single matching evidence ID, a human-led review recommendation, and `human_review_required: true`.
+Correctness and negative-control checks were run with `./scripts/test`: `20 passed, 1 skipped` and the Vite production build passed. The skipped test remains the unavailable raw Postgres TCP integration fixture; FastAPI/Starlette emitted one known TestClient deprecation warning. The test suite confirms that a narrative is generated once only for a new signal, then returns no new evidence when the controlled pending set is empty; it rejects a schema-valid causal response and accepts only an output whose cited ID equals the persisted signal ID. Latency and reliability are not applicable because Phase 4 does not change the Phase 2 stream path. Groundedness was checked against the persisted record: its citation exactly matched the source signal, its recommendation remained a human review, and no causal phrase was displayed.
 
-Correctness and negative-control checks were run with `./scripts/test`: `20 passed, 1 skipped` and the Vite production build passed. The skipped test remains the unavailable raw Postgres TCP integration fixture; FastAPI/Starlette emitted one known TestClient deprecation warning. The test suite confirms that a model narrative is generated once only for a new signal, then returns no new evidence when the controlled pending set is empty; it rejects a schema-valid causal response and accepts a Gemini structured response only when its cited ID equals the persisted signal ID. Latency and reliability are not applicable because Phase 4 does not change the Phase 2 stream path; the real Gemini preflight, persisted-signal read, generation, and write completed in an 8.1-second end-to-end command. Groundedness was also checked against the live persisted record: its citation exactly matched the source signal, its recommendation remained a human review, and no causal phrase was displayed.
+The first real browser check exposed a Vite development-proxy omission: `/signals` and `/insights` were returning the SPA HTML, causing JSON parsing errors. Adding those paths plus `/recommendations` to the proxy corrected the integration. The final real browser demo loaded with no error overlay or browser errors, displayed all four persisted evidence rows, changed the recommendation lifecycle to `implemented`, and recorded the outcome `client_acquisition_cost = 121.4`. Before submission, a funded GPT-5.6 execution is required if the video claims live GPT-5.6 model output.
 
-The first real browser check exposed a Vite development-proxy omission: `/signals` and `/insights` were returning the SPA HTML, causing JSON parsing errors. Adding those paths plus `/recommendations` to the proxy corrected the integration. The final real browser demo loaded with no error overlay or browser errors, displayed all four persisted evidence rows, showed the Gemini-generated insight and its 99.3 score, changed its lifecycle to `implemented`, and recorded the synthetic outcome `client_acquisition_cost = 121.4`. This is a real database-backed Phase 4 demo; it is not a visual product claim about GPT-5.6. Before Phase 6, a funded GPT-5.6 execution is required if the submission or video claims live GPT-5.6 model output.
+#### Decision: Retain only the OpenAI reasoning path
 
-#### Decision: Retain GPT-5.6 while using Gemini 3.1 Flash-Lite as an explicit free-tier development fallback
+- Decision: Retain the OpenAI Responses implementation and model preflight as the single narrative-generation path.
+- Context: The product must satisfy the Build Week model requirement without introducing a second production-facing provider path.
+- Options considered: Keep multiple provider implementations; use a canned local narrator as model output; retain one OpenAI implementation with deterministic fixtures limited to tests.
+- Choice made: One OpenAI implementation with server-side configuration and the same evidence contract for every request.
+- Rationale: A single reasoning boundary keeps deployment configuration, security review, and submission claims clear while preserving the deterministic-first design.
+- Trade-offs accepted: Live on-demand narrative generation depends on funded OpenAI API access; cached evidence-linked records remain explorable when it is unavailable.
+- Revisit trigger: A later product requirement demonstrates the value of an additional provider without weakening the evidence boundary or submission story.
 
-- Decision: Keep the OpenAI Responses implementation and model preflight in the codebase, but select Gemini 3.1 Flash-Lite through `AI_PROVIDER=gemini` for the active Phase 4 development environment.
-- Context: The OpenAI key could list the configured model but could not complete an inference call because the account returned `insufficient_quota`; the user supplied a Gemini API key and requested the cheapest free-tier model.
-- Options considered: Stop all Phase 4 work until OpenAI credit is added; use a canned local narrator and present it as model output; replace the OpenAI path entirely; retain the OpenAI path and add a labelled Gemini fallback with the same evidence contract.
-- Choice made: Retain both provider implementations, use Gemini 3.1 Flash-Lite for the current live demonstration, and keep provider selection as server-only environment configuration.
-- Rationale: Gemini 3.1 Flash-Lite supports structured output and enables a real provider-backed validation without sending raw events or weakening the deterministic evidence boundary. Retaining the OpenAI path preserves a clear route to the original GPT-5.6 submission objective.
-- Trade-offs accepted: The current live narrative is Gemini output, not GPT-5.6 output. Free-tier Gemini use is appropriate only for the synthetic dataset and must not be used with real enterprise data without a privacy review. The Build Week demo cannot claim live GPT-5.6 generation until a funded OpenAI call is verified.
-- Revisit trigger: OpenAI Platform credit is available, the target model completes a real structured-output call, and the same groundedness checks pass against that output.
+#### Decision: Enforce post-generation validation against the persisted packet
 
-#### Decision: Enforce provider-neutral post-generation validation rather than a provider-specific phrase check
-
-- Decision: Validate the final structured narrative after either provider returns it, allowing the documented phrases `predictive` or `evidence is consistent with`, while rejecting causal language and any unsupported evidence ID.
-- Context: The first real Gemini response followed the allowed “evidence is consistent with” wording but was rejected because the validator accepted only the literal word `predictive`.
-- Options considered: Force every provider to include the word `predictive`; accept all schema-valid text; implement the documented two-phrase non-causal policy and preserve the causal-language denylist.
-- Choice made: Implement the two-phrase policy after schema and ID validation.
-- Rationale: The server contract now matches the system prompt, is provider-neutral, and still blocks a schema-valid but causally worded response in the negative-control test.
+- Decision: Validate the structured narrative after generation, allowing the documented predictive phrasing while rejecting causal language and any unsupported evidence ID.
+- Context: Schema-valid output can still use unsupported language or cite a signal outside the supplied evidence packet.
+- Options considered: Force one literal phrase; accept all schema-valid text; validate citations and the non-causal language policy after schema parsing.
+- Choice made: Apply the documented two-phrase policy after schema and ID validation.
+- Rationale: The server contract matches the prompt and blocks a schema-valid but causally worded response in the negative-control test.
 - Trade-offs accepted: Keyword checks cannot prove semantic grounding by themselves, so persisted-ID equality and restricted evidence packets remain the primary guardrails.
 - Revisit trigger: Evaluation data shows that a semantic policy classifier improves false-accept or false-reject behavior without obscuring the audit trail.
 
@@ -708,7 +706,7 @@ Correctness and negative-control checks were run through `./scripts/test`: **26 
 - Context: The repository can prepare for deployment, but only the user can authorize cloud projects, fund the OpenAI account, publish YouTube content, retrieve the `/feedback` ID, and authorize a Devpost draft update.
 - Options considered: Use placeholder credentials; present unverified configuration as deployed; prepare the artifacts and pause for exact manual inputs.
 - Choice made: Prepare the artifacts and pause at the documented manual gates.
-- Rationale: This preserves the challenge's evidence requirements and avoids turning the Gemini fallback or an untested deployment config into an unsupported GPT-5.6 or judge-access claim.
+- Rationale: This preserves the challenge's evidence requirements and avoids turning an untested deployment configuration into an unsupported GPT-5.6 or judge-access claim.
 - Trade-offs accepted: The Phase 6 end-to-end rehearsal and submission cannot be marked complete in this environment yet.
 - Revisit trigger: The migration, Render/Vercel origins, funded OpenAI call, public video, and feedback ID are supplied and verified.
 
@@ -889,6 +887,52 @@ The deployed rehearsal now requires the Casefile recomputation state to be `matc
 - Rationale: The public experience stays safe for judges while making its limitations honest, and the rehearsal catches stale Render deployments before recording a demo or submission.
 - Trade-offs accepted: The deployed judge simulation cannot itself satisfy the durable-cold-storage acceptance target; that target remains proven by the controlled Phase 2 rehearsal against Supabase.
 - Revisit trigger: A disposable or isolated deployment database permits a judge-safe durable-write rehearsal without mutating the seeded evidence set.
+
+### Phase 6 Interactive Decision Workspace Correction — 2026-07-18
+
+The visible **READ-ONLY DEMO** banner and repeated simulation language made the deployed workspace appear like a static mock, even though the application already implements server-backed recommendation lifecycle transitions and measured-outcome recording. The experience now presents a live decision workspace with compact provenance language: the dataset is a seeded enterprise scenario, while human decisions are saved through the existing Supabase-backed recommendation and outcome stores. The public workspace does not execute external business actions; it records proposed, planned, and implemented decisions plus measured results.
+
+Render's blueprint default is now `DEMO_READ_ONLY=false`. The visible workspace no longer shows a read-only banner or a protected-action disclosure, replaces synthetic-demo calls to action with decision-workspace language, and exposes `Live decision feed` when the simulator is running. The landing page and Casefile retain accurate seeded-scenario and predictive-evidence boundaries without using them as the product's primary identity. The deployed rehearsal now expects `demo_access=interactive` and `cold_path_mode=durable_store`; it checks availability rather than mutating a shared recommendation during an automated public run.
+
+Correctness and groundedness checks passed through the existing API lifecycle test: it generates a validated evidence-linked recommendation, rejects an invalid lifecycle jump, persists `proposed → planned → implemented`, rejects an invalid backward transition, and records a measured outcome. The test suite returned **34 passed, 1 skipped, 1 warning**; the skip remains the unavailable raw-Postgres TCP fixture and the warning remains the upstream Starlette TestClient deprecation. The Vite production build passed (`39 modules transformed`, `237.38 kB` JavaScript before gzip), Ruff and Python compilation passed, and `git diff --check` passed. The durable-pipeline acceptance evidence remains the controlled Phase 2 600-event rehearsal; the interactive deployment must run the updated rehearsal after the Render environment variable is changed.
+
+#### Decision: Make the seeded-data product interactive while keeping actions human-controlled
+
+- Decision: Deploy the seeded enterprise scenario as an interactive shared decision workspace, not a read-only judge demonstration.
+- Context: The core product proposition is evidence-backed human action and outcome tracking; a read-only banner and disabled controls hid that workflow and made the interface look simulated.
+- Options considered: Retain the read-only presentation; remove the label while keeping actions blocked; permit browser-only mock changes; enable the existing server-backed lifecycle and outcome workflow.
+- Choice made: Enable the existing server-backed workflow with `DEMO_READ_ONLY=false`, remove the mock-like UI language, and retain a concise data-provenance disclosure.
+- Rationale: The data can be synthetic while a decision workflow is real. Persisted lifecycle and outcome records make the agent's feedback loop tangible without giving the system authority to perform external business actions.
+- Trade-offs accepted: Until authentication and tenant isolation are added, this is a shared public workspace and visitors can alter the displayed decision record. It is suitable for a controlled hackathon demo, not a production multi-user deployment.
+- Revisit trigger: Add authenticated identities, ownership policies, audit attribution, and isolated tenant/demo datasets before allowing untrusted public users to modify decision records.
+
+### Phase 6 Judge Experimentation and Model-Surface Correction — 2026-07-18
+
+The judge workspace is now configured as interactive by default: `DEMO_READ_ONLY=false` enables the existing server-backed recommendation lifecycle and outcome endpoints, while the simulator writes through the durable cold path. The product surface keeps one concise provenance cue in the workspace and removes the repeated demo/read-only framing from the home page, Casefile, README, runbook, and recording script. The codebase now has one server-side narrative path: the OpenAI Responses implementation. The obsolete alternate-provider implementation, environment variables, tests, deployment configuration, and current-document references were removed.
+
+Correctness and groundedness were rechecked with `./scripts/test`: **33 passed, 1 skipped, 1 warning**. The suite covers evidence-linked insight generation, prohibited direct lifecycle jumps, persisted `proposed → planned → implemented` transitions, outcome recording, cited-ID enforcement, causal-language rejection, and unsupported chat refusal. The Vite production build passed (39 modules, 237.30 kB JavaScript before gzip); Ruff, Python compilation, `git diff --check`, and a tracked-source scan for the removed provider/configuration also passed. The skip remains the unavailable raw-Postgres pooler fixture and the warning remains the upstream Starlette TestClient deprecation. Phase 2's 600-event durability rehearsal remains the latency/reliability evidence for the pipeline; this copy/configuration increment does not change the streaming algorithm.
+
+Hosted verification is pending the next Render deployment: this environment could not resolve the Render hostname, and an isolated browser process could not reach the local Vite server. These are environment limitations, not a substituted pass. After the approved commit is deployed, the required check is `uv run python -m scripts.phase6_rehearsal --base-url https://enterprise-intelligence-agent.onrender.com`, followed by the Vercel browser journey that saves a lifecycle transition and outcome.
+
+#### Decision: Optimize the public workspace for real decision experimentation
+
+- Decision: Make the shared seeded-data workspace interactive and use one concise provenance statement rather than repeated product-wide disclaimers.
+- Context: The read-only presentation made persisted decision controls look like browser mockups and obscured the feedback loop that differentiates MetricThread.
+- Options considered: Retain read-only controls; simulate browser-only changes; enable the existing server-backed lifecycle and outcome flow with concise context.
+- Choice made: Enable server-backed interaction by default and foreground the evidence-to-decision workflow.
+- Rationale: A seeded dataset can support genuine experimentation when the actions, outcomes, and scenario records are stored and evidence-linked.
+- Trade-offs accepted: The public workspace is shared until authentication and isolated datasets are added.
+- Revisit trigger: The demo adds judge identities or per-visitor workspaces.
+
+#### Decision: Keep one OpenAI narrative integration in the shipped project
+
+- Decision: Remove the alternate-provider runtime and retain the OpenAI Responses integration as the single model path.
+- Context: The submission needs a clear, auditable model boundary and the public repository should not carry unused provider configuration.
+- Options considered: Retain multiple runtime providers; keep dormant provider code; ship one tested OpenAI boundary.
+- Choice made: Keep one server-side OpenAI integration with strict structured output and evidence validation.
+- Rationale: It reduces configuration complexity and keeps the submission story aligned with the Build Week model requirement.
+- Trade-offs accepted: New on-demand narratives require funded OpenAI API access; persisted evidence and decision experimentation remain available without it.
+- Revisit trigger: A future product requirement justifies a separate, fully tested provider boundary.
 
 ## 14. Glossary
 
