@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 
 from metricthread.insights import (
     InsightRecord,
-    InsightStore,
     RecommendationRecord,
     validate_recommendation_transition,
 )

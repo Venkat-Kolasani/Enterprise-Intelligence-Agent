@@ -101,7 +101,7 @@ The supplied configuration builds the FastAPI API as a Render Docker service and
 3. Deploy the frontend with `VITE_API_BASE_URL` set to the Render API origin.
 4. Set `CORS_ALLOWED_ORIGINS` on Render to the exact Vercel origin, redeploy, then run the rehearsal command.
 
-Judge-demo mode prevents persistent signal analysis, AI generation, recommendation lifecycle changes, outcomes, and briefing generation. It still serves persisted evidence and insights, supports grounded chat, runs the labelled simulator, and calculates deterministic scenarios without durable writes.
+Judge-demo mode prevents persistent signal analysis, AI generation, recommendation lifecycle changes, outcomes, and briefing generation. It still serves persisted evidence and insights, supports grounded chat, runs the labelled simulator, and calculates deterministic scenarios without durable writes. Its live cold-path status is explicitly labelled as an **in-memory read-only demo sink**; it is not presented as a durable Supabase write. The separate Phase 2 rehearsal verifies durable Stream-to-Supabase persistence.
 
 ```bash
 uv run python -m scripts.phase6_rehearsal --base-url https://YOUR-RENDER-API.onrender.com

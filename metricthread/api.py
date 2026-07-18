@@ -175,12 +175,14 @@ def create_app(
     @app.get("/agent/status")
     def agent_status() -> dict[str, object]:
         status = asdict(app.state.runtime.pipeline.status())
+        cold_path_mode = "ephemeral_demo_sink" if app.state.demo_read_only else "durable_store"
         return {
             **status,
             "anomaly_state": "watching",
             "signal_state": "deterministic analysis available",
             "simulation_label": "synthetic live simulation",
             "demo_access": "read_only" if app.state.demo_read_only else "interactive",
+            "cold_path_mode": cold_path_mode,
         }
 
     @app.get("/health")

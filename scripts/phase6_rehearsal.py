@@ -32,12 +32,18 @@ def main() -> None:
             raise AssertionError("agent status is missing the synthetic-data label")
         if status.get("demo_access") != "read_only":
             raise AssertionError("deployed judge demo is not read-only")
+        if status.get("cold_path_mode") != "ephemeral_demo_sink":
+            raise AssertionError("judge demo does not disclose its in-memory cold-path sink")
 
         signals = request_json(client, "GET", "/signals").get("signals", [])
         if not signals:
             raise AssertionError("no accepted signals are available to a judge")
         if any(signal.get("adjusted_q_value", 1) > 0.05 for signal in signals):
             raise AssertionError("an uncorrected signal appeared in the judge demo")
+
+        casefile = request_json(client, "GET", f"/signals/{signals[0]['id']}/casefile").get("casefile", {})
+        if casefile.get("recomputation", {}).get("state") != "matches_persisted_evidence":
+            raise AssertionError("primary Casefile does not match its persisted evidence")
 
         insights = request_json(client, "GET", "/insights").get("insights", [])
         if not insights:
@@ -84,7 +90,7 @@ def main() -> None:
         if blocked.status_code != 403:
             raise AssertionError(f"read-only signal analysis was not blocked: {blocked.status_code}")
 
-    print("Phase 6 deployed rehearsal passed: read-only, grounded, evidence-linked, and live paths verified.")
+    print("Phase 6 deployed rehearsal passed: read-only, evidence-matched, grounded, and live paths verified.")
 
 
 if __name__ == "__main__":

@@ -874,6 +874,22 @@ Against the real Supabase-backed active evidence, three direct primary assessmen
 - Trade-offs accepted: The current small fixture uses one assessment per exact fingerprint rather than first-class evaluation-run provenance, scheduling, or retention policies.
 - Revisit trigger: Production governance requires evaluation-run owners, immutable model artifacts, archival rules, approval workflows, and alerting when a previously eligible signal becomes suppressed.
 
+### Phase 6 Audit Corrections — 2026-07-18
+
+A fresh audit found two presentation-integrity issues. The deployed Casefile labelled the primary persisted signal as **REVIEW** even though a read-only local recomputation against the same Supabase evidence returned `matches_persisted_evidence` for signal `0a3a777e-08b6-5b99-b348-cd6174608cc6` and fingerprint `4f8e33429cde64cbc16f80fff274fe9c890885de7cf2b11d1d8f648a92a4c4f1`. This indicates that the deployed Render service was stale rather than that the deterministic evidence had changed. Also, the judge-demo runtime deliberately uses an `InMemoryColdStore` to prevent demo writes, but the frontend incorrectly labelled its processed count as durable.
+
+The deployed rehearsal now requires the Casefile recomputation state to be `matches_persisted_evidence` and requires `cold_path_mode=ephemeral_demo_sink` for the read-only judge service. The API exposes that explicit mode, and the dashboard labels the value as an in-memory read-only demo sink rather than durable storage. The separate Phase 2 temporary-stream rehearsal remains the durable write verification: it is not substituted by the public judge simulation. The root check completed with **34 passed, 1 skipped, 1 warning**; the skip remains the unavailable raw-Postgres TCP fixture and the warning is the upstream Starlette TestClient deprecation. Ruff, Python compilation, `git diff --check`, and the Vite production build all passed; the build produced `237.69 kB` JavaScript before gzip. A current read-only Supabase Casefile recomputation confirmed the primary persisted fingerprint matches. Production rehearsal must run again after Render deploys this commit.
+
+#### Decision: Make read-only-demo durability boundaries and Casefile deployment state testable
+
+- Decision: Label the judge-mode cold consumer as an ephemeral in-memory sink and make the deployed rehearsal fail when either that boundary or Casefile evidence matching is not explicit.
+- Context: A forensic UI cannot claim a durable write in a mode intentionally configured not to write, and a locally-correct evidence comparison is insufficient if a stale public backend renders a contradictory Casefile seal.
+- Options considered: Keep the durable label; enable durable writes in the judge demo; disclose the ephemeral sink while preserving the existing separate durable-pipeline rehearsal; rely on manual browser inspection of the Casefile.
+- Choice made: Preserve the read-only judge boundary, disclose it in API/UI/README, and enforce both the boundary and Casefile match in the automated deployed rehearsal.
+- Rationale: The public experience stays safe for judges while making its limitations honest, and the rehearsal catches stale Render deployments before recording a demo or submission.
+- Trade-offs accepted: The deployed judge simulation cannot itself satisfy the durable-cold-storage acceptance target; that target remains proven by the controlled Phase 2 rehearsal against Supabase.
+- Revisit trigger: A disposable or isolated deployment database permits a judge-safe durable-write rehearsal without mutating the seeded evidence set.
+
 ## 14. Glossary
 
 Domain: one of the business functions the system reasons over, such as Client, Financial, or Partner, stored as a tag on the generic event table rather than a separate schema.

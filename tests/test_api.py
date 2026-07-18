@@ -188,6 +188,7 @@ def test_read_only_judge_demo_blocks_persistence_but_keeps_forecasts_and_cors_av
         )
 
     assert status.json()["demo_access"] == "read_only"
+    assert status.json()["cold_path_mode"] == "ephemeral_demo_sink"
     assert health.json()["status"] == "ok"
     assert blocked_signals.status_code == 403
     assert blocked_insight.status_code == 403

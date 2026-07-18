@@ -36,6 +36,7 @@ export function OverviewPanel({ data, onNavigate }) {
   const signalSource = primarySignal?.source.metric ?? 'partner_referral_quality'
   const signalTarget = primarySignal?.target.metric ?? 'client_acquisition_cost'
   const historyDays = primarySignal?.bic_model_history_days ?? '—'
+  const usesEphemeralDemoSink = data.status?.cold_path_mode === 'ephemeral_demo_sink'
 
   return (
     <div className="overview-panel">
@@ -82,7 +83,14 @@ export function OverviewPanel({ data, onNavigate }) {
       <section className="operational-stats" aria-label="Live operating status">
         <OperationalStat label="Ingestion" value={data.status?.simulation_state ?? 'connecting'} detail={`${data.status?.stream_length ?? 0} retained stream events`} tone={data.isRunning ? 'healthy' : 'neutral'} />
         <OperationalStat label="Hot path" value={`${data.status?.hot_events_processed ?? 0} processed`} detail={`${data.status?.p95_hot_visibility_ms ?? '—'} ms p95 · ${data.status?.hot_pending ?? 0} pending`} tone="healthy" />
-        <OperationalStat label="Cold path" value={`${data.status?.cold_events_persisted ?? 0} durable`} detail={`${data.status?.p95_cold_persistence_ms ?? '—'} ms p95 · ${data.status?.cold_pending ?? 0} pending`} tone={data.coldBlocked ? 'attention' : 'healthy'} />
+        <OperationalStat
+          label="Cold path"
+          value={`${data.status?.cold_events_persisted ?? 0} ${usesEphemeralDemoSink ? 'demo sink' : 'durable'}`}
+          detail={usesEphemeralDemoSink
+            ? `in-memory read-only sink · ${data.status?.p95_cold_persistence_ms ?? '—'} ms p95 · ${data.status?.cold_pending ?? 0} pending`
+            : `${data.status?.p95_cold_persistence_ms ?? '—'} ms p95 · ${data.status?.cold_pending ?? 0} pending`}
+          tone={data.coldBlocked ? 'attention' : 'healthy'}
+        />
         <OperationalStat label="Evidence engine" value={`${data.signals.length} retained`} detail="BH-corrected q ≤ 0.05" tone={data.signals.length ? 'healthy' : 'neutral'} />
       </section>
 
