@@ -107,9 +107,30 @@ The deployed workspace uses a seeded scenario for its data layer while retaining
 uv run python -m scripts.phase6_rehearsal --base-url https://YOUR-RENDER-API.onrender.com
 ```
 
-## Build Week record
+## Built with Codex + GPT-5.6
 
-The project was built in approval-gated phases with Codex used for repository implementation, tests, deployment configuration, and documentation. The reasoning integration uses the OpenAI Responses API and does not represent an unverified model run as GPT-5.6 output.
+MetricThread was built with Codex as an active engineering collaborator, from the first architecture decisions through implementation, verification, and the judge-ready product surface.
+
+### How we used Codex
+
+Codex helped translate the original idea into a phase-gated engineering plan, then implement and validate the product end to end. Its work included:
+
+- designing the generic event schema and deterministic seeded enterprise dataset;
+- implementing the React/Vite workspace and FastAPI service;
+- building the Upstash Redis Streams hot/cold pipeline with independent consumer groups, acknowledgements, recovery, and idempotent durable writes;
+- implementing the ADF, BIC, Granger, Benjamini–Hochberg, confidence, Casefile, and rolling-origin resilience layers;
+- writing focused regression tests for negative controls, grounded citations, recommendation transitions, outcome recording, and unsupported-question refusal;
+- refining the live demo path, deployment configuration, and auditable project documentation.
+
+The result is not a generated dashboard prototype. It is a testable system with a deterministic evidence layer, an interactive decision workflow, and an explicit model boundary.
+
+### How we used GPT-5.6
+
+GPT-5.6 is integrated through the OpenAI Responses API as MetricThread's evidence-grounded reasoning layer. It receives only a compact, validated packet for an already accepted signal and must return strict structured output with the stored signal ID. Server-side validation rejects unknown citations and causal wording, while the deterministic confidence score remains immutable. The model explains evidence; it does not calculate it, select it, or execute a decision.
+
+In practice, the deterministic engine first finds and validates a predictive lead–lag signal. Evidence Resilience then checks that the relationship remains stable across rolling historical windows, beats a target-history baseline, and keeps negative controls rejected. Only then can GPT-5.6 receive the compact evidence packet to write an executive-facing narrative and a human-controlled recommendation. This keeps language generation useful while making the facts, score, and decision boundary inspectable.
+
+The project does not present an unverified model response as GPT-5.6 output. The full implementation record is in the [Codex and model collaboration record](docs/collaboration-record.md).
 
 Before submission, a funded OpenAI structured-output call must pass the same groundedness checks, and the public video must accurately show and narrate that result. The remaining evidence and manual checklist are in:
 
